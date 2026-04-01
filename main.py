@@ -1,147 +1,153 @@
-"""
-main.py — TailScan FastAPI application
-"""
-import asyncio
+"""TailScan — FastAPI app."""
+
 import os
-from contextlib import asynccontextmanager
-from pathlib import Path
-
 from dotenv import load_dotenv
-
 load_dotenv()
 
-from fastapi import FastAPI, Request, Depends, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-
 import auth
 import tailscale
 import scanner
 
-BASE_DIR = Path(__file__).parent
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+app = FastAPI(title="TailScan")
+templates = Jinja2Templates(directory="templates")
+
+CLIENT_ID = os.getenv("TAILSCALE_CLIENT_ID", "")
+CLIENT_SECRET = os.getenv("TAILSCALE_CLIENT_SECRET", "")
+REDIRECT_URI = os.getenv("TAILSCALE_REDIRECT_URI", "http://localhost:8080/auth/callback")
+TAILNET = os.getenv("TAILNET", "-")  # "-" = current tailnet
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    print("TailScan starting up...")
-    yield
-    # Shutdown
-    print("TailScan shutting down.")
+def get_session(request: Request) -> dict | None:
+    cookie = request.cookies.get("ts_session")
+    if not cookie:
+        return None
+    return auth.decode_session_cookie(cookie)
 
 
-app = FastAPI(title="TailScan", lifespan=lifespan)
-app.include_router(auth.router)
+# ─── Auth routes ────────────────────────────────────────────────────────────
+
+@app.get("/login")
+def login():
+    url, _ = auth.generate_oauth_url(CLIENT_ID, REDIRECT_URI)
+    return RedirectResponse(url)
 
 
-# ── Page Routes ────────────────────────────────────────────────────────────────
+@app.get("/auth/callback")
+def auth_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    if error:
+        raise HTTPException(400, f"OAuth error: {error}")
+    if not code:
+        raise HTTPException(400, "Missing code")
+
+    try:
+        tokens = auth.exchange_code(CLIENT_ID, CLIENT_SECRET, code, REDIRECT_URI)
+        access_token = tokens.get("access_token", "")
+        user_info = auth.get_userinfo(access_token)
+    except Exception as e:
+        raise HTTPException(500, f"Auth failed: {e}")
+
+    cookie_val = auth.make_session_cookie(user_info, access_token)
+    response = RedirectResponse("/", status_code=302)
+    response.set_cookie(
+        "ts_session", cookie_val,
+        httponly=True, samesite="lax",
+        max_age=60 * 60 * 24 * 7
+    )
+    return response
+
+
+@app.get("/logout")
+def logout():
+    response = RedirectResponse("/login", status_code=302)
+    response.delete_cookie("ts_session")
+    return response
+
+
+# ─── Main UI ────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    user = auth.get_session(request)
-    if not user:
-        return RedirectResponse(url="/auth/login")
-    return templates.TemplateResponse("index.html", {"request": request, "user": user})
+def index(request: Request):
+    session = get_session(request)
+    if not session:
+        return RedirectResponse("/login")
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "user": session,
+    })
 
 
-# ── API Routes ─────────────────────────────────────────────────────────────────
+# ─── API endpoints ──────────────────────────────────────────────────────────
 
-@app.get("/api/status")
-async def api_status(request: Request):
-    """Get tailnet status: peers + active exit node."""
-    auth.require_session(request)
-    try:
-        status = await tailscale.get_tailnet_status()
-        peers = tailscale.parse_peers(status)
-        active = next((p for p in peers if p["is_active_exit_node"]), None)
-        return {
-            "peers": peers,
-            "active_exit_node": active,
-            "self": next((p for p in peers if p.get("is_self")), None),
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/api/peers")
+def api_peers(request: Request):
+    if not get_session(request):
+        raise HTTPException(401)
+    peers = tailscale.get_all_peers_local()
+    current_exit = tailscale.get_current_exit_node()
+    return {"peers": peers, "current_exit_node": current_exit}
 
 
-@app.post("/api/exit-node/connect")
-async def connect_exit_node(request: Request):
-    """Switch to a new exit node."""
-    auth.require_session(request)
+@app.post("/api/exit-node/set")
+async def api_set_exit_node(request: Request):
+    if not get_session(request):
+        raise HTTPException(401)
     body = await request.json()
-    ip = body.get("ip", "").strip()
-    if not ip:
-        raise HTTPException(status_code=400, detail="ip is required")
-    try:
-        await tailscale.set_exit_node(ip)
-        # Small delay so routing table settles
-        await asyncio.sleep(2)
-        return {"ok": True, "exit_node": ip}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    ip = body.get("ip", "")
+    ok = tailscale.set_exit_node(ip)
+    if not ok:
+        raise HTTPException(500, "Failed to set exit node")
+    return {"ok": True, "exit_node": ip or None}
 
 
 @app.post("/api/exit-node/disconnect")
-async def disconnect_exit_node(request: Request):
-    """Disconnect from current exit node."""
-    auth.require_session(request)
-    try:
-        await tailscale.set_exit_node("")
-        await asyncio.sleep(1)
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def api_disconnect(request: Request):
+    if not get_session(request):
+        raise HTTPException(401)
+    tailscale.set_exit_node("")
+    return {"ok": True}
 
 
 @app.get("/api/scan")
-async def api_scan(request: Request):
-    """
-    Run a full scan:
-    1. Get WAN IP + geolocation
-    2. Detect LAN subnet
-    3. Run nmap sweep
-    Returns combined results.
-    """
-    auth.require_session(request)
-    try:
-        # Run geo and subnet detection concurrently
-        geo_task = asyncio.create_task(scanner.get_wan_geo())
-        geo = await geo_task
+def api_scan(request: Request):
+    if not get_session(request):
+        raise HTTPException(401)
 
-        subnet = scanner.detect_lan_subnet()
-        if not subnet:
-            return {
-                "geo": geo,
-                "subnet": None,
-                "hosts": [],
-                "error": "Could not detect LAN subnet. Are you connected to an exit node?",
-            }
+    geo = scanner.get_wan_geo()
+    current_exit = tailscale.get_current_exit_node()
 
-        hosts = await scanner.scan_lan(subnet)
+    if not current_exit:
         return {
+            "connected": False,
             "geo": geo,
-            "subnet": subnet,
-            "hosts": hosts,
-            "error": None,
+            "devices": [],
+            "subnet": None,
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+    subnet = scanner.detect_lan_subnet()
+    devices = []
+    if subnet:
+        devices = scanner.scan_lan(subnet)
+
+    return {
+        "connected": True,
+        "exit_node_ip": current_exit,
+        "geo": geo,
+        "subnet": subnet,
+        "devices": devices,
+    }
 
 
 @app.get("/api/geo")
-async def api_geo(request: Request):
-    """Quick WAN IP + geo lookup without scanning."""
-    auth.require_session(request)
-    try:
-        geo = await scanner.get_wan_geo()
-        return geo
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def api_geo(request: Request):
+    if not get_session(request):
+        raise HTTPException(401)
+    return scanner.get_wan_geo()
 
 
 if __name__ == "__main__":
     import uvicorn
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8080"))
-    uvicorn.run("main:app", host=host, port=port, reload=False)
+    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=False)
