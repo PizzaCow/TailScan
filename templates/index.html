@@ -310,7 +310,8 @@ async function runScan() {
 
 function renderScan(d) {
   const main = document.getElementById('main-content');
-  if (!d.connected) {
+  // Don't reset UI to "not connected" just because scan says so — trust sidebar state
+  if (!d.connected && !currentExitNode) {
     main.innerHTML = `
       <div id="no-exit-msg">
         <div style="font-size:56px;">🛰️</div>
@@ -319,6 +320,8 @@ function renderScan(d) {
       </div>`;
     return;
   }
+  // If we think we're connected but scan disagrees, keep showing results anyway
+  if (!d.connected) d.connected = true;
 
   const geo = d.geo || {};
   const devices = d.devices || [];
