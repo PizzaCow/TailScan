@@ -1,518 +1,457 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TailScan</title>
-  <style>
-    :root {
-      --bg-0: #0f1117;
-      --bg-1: #161b27;
-      --bg-2: #1e2536;
-      --bg-3: #242d42;
-      --border: #2d3a52;
-      --text-primary: #e8eaf0;
-      --text-secondary: #8892aa;
-      --text-muted: #5a6480;
-      --accent: #4f79e0;
-      --accent-hover: #6b91f0;
-      --accent-dim: rgba(79,121,224,0.15);
-      --exit-color: #34d399;
-      --exit-dim: rgba(52,211,153,0.15);
-      --warn: #f59e0b;
-      --danger: #ef4444;
-      --success: #10b981;
-      --font: 'Inter', system-ui, -apple-system, sans-serif;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; background: var(--bg-0); color: var(--text-primary); font-family: var(--font); font-size: 14px; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TailScan</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #222636;
+    --border: #2d3148;
+    --text: #e2e8f0;
+    --muted: #7c85a2;
+    --accent: #5b6ee8;
+    --accent-hover: #4a5cd6;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #f59e0b;
+    --exit-badge: #7c3aed;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
 
-    /* ── Layout ── */
-    .app { display: flex; flex-direction: column; height: 100vh; }
+  /* Top bar */
+  .topbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 20px; height: 52px;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .topbar .logo { font-weight: 700; font-size: 16px; color: var(--accent); letter-spacing: 0.5px; }
+  .topbar .spacer { flex: 1; }
+  .topbar .exit-status {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--muted);
+  }
+  .topbar .exit-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+  .topbar .exit-status .dot.connected { background: var(--green); }
+  .topbar .exit-name { color: var(--text); font-weight: 500; }
+  .btn {
+    padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer;
+    font-size: 13px; font-weight: 500; transition: background 0.15s;
+  }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+  .btn-danger { background: transparent; color: var(--red); border: 1px solid var(--border); }
+  .btn-danger:hover { background: rgba(239,68,68,0.1); }
 
-    /* ── Top Bar ── */
-    .topbar {
-      display: flex; align-items: center; gap: 12px;
-      padding: 0 20px; height: 52px;
-      background: var(--bg-1); border-bottom: 1px solid var(--border);
-      flex-shrink: 0;
-    }
-    .topbar-logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; color: var(--text-primary); }
-    .topbar-logo svg { color: var(--accent); }
-    .topbar-sep { flex: 1; }
-    .topbar-node {
-      display: flex; align-items: center; gap: 8px; padding: 6px 12px;
-      background: var(--exit-dim); border: 1px solid var(--exit-color);
-      border-radius: 6px; font-size: 13px; color: var(--exit-color);
-    }
-    .topbar-node.none { background: var(--bg-2); border-color: var(--border); color: var(--text-muted); }
-    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--exit-color); flex-shrink: 0; }
-    .dot.off { background: var(--text-muted); }
-    .refresh-badge {
-      display: flex; align-items: center; gap: 6px; padding: 5px 10px;
-      background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
-      font-size: 12px; color: var(--text-muted);
-    }
-    .refresh-badge svg { animation: spin 1s linear infinite; display: none; }
-    .refresh-badge.scanning svg { display: block; }
-    btn, button { cursor: pointer; font-family: var(--font); font-size: 13px; border: none; border-radius: 6px; padding: 6px 14px; transition: background 0.15s; }
-    .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
-    .btn-ghost:hover { background: var(--bg-2); color: var(--text-primary); }
-    .btn-danger { background: rgba(239,68,68,0.1); color: var(--danger); border: 1px solid rgba(239,68,68,0.3); }
-    .btn-danger:hover { background: rgba(239,68,68,0.2); }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover { background: var(--accent-hover); }
+  /* Layout */
+  .layout { display: flex; flex: 1; overflow: hidden; }
 
-    /* ── Body ── */
-    .body { display: flex; flex: 1; overflow: hidden; }
+  /* Sidebar */
+  .sidebar {
+    width: 280px; flex-shrink: 0;
+    background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .sidebar-header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .sidebar-header h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); }
+  .sidebar-list { overflow-y: auto; flex: 1; padding: 8px; }
+  .peer-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 8px; cursor: pointer;
+    transition: background 0.12s; margin-bottom: 2px;
+  }
+  .peer-item:hover { background: var(--surface2); }
+  .peer-item.active-exit { background: rgba(91,110,232,0.15); border: 1px solid rgba(91,110,232,0.3); }
+  .peer-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--red); }
+  .peer-dot.online { background: var(--green); }
+  .peer-info { flex: 1; min-width: 0; }
+  .peer-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .peer-ip { font-size: 11px; color: var(--muted); font-family: monospace; }
+  .peer-badges { display: flex; gap: 4px; margin-top: 2px; flex-wrap: wrap; }
+  .badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600;
+  }
+  .badge-exit { background: rgba(124,58,237,0.2); color: #a78bfa; border: 1px solid rgba(124,58,237,0.3); }
+  .badge-self { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+  .badge-os { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .section-label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px;
+    color: var(--muted); padding: 8px 10px 4px; margin-top: 4px;
+  }
 
-    /* ── Left Panel ── */
-    .left-panel {
-      width: 280px; flex-shrink: 0;
-      background: var(--bg-1); border-right: 1px solid var(--border);
-      display: flex; flex-direction: column; overflow: hidden;
-    }
-    .panel-header { padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
-    .panel-header h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
-    .device-list { flex: 1; overflow-y: auto; padding: 8px; }
-    .device-item {
-      display: flex; align-items: center; gap: 10px; padding: 9px 10px;
-      border-radius: 7px; cursor: pointer; transition: background 0.12s;
-      margin-bottom: 2px; border: 1px solid transparent;
-    }
-    .device-item:hover { background: var(--bg-2); }
-    .device-item.exit-node { border-color: rgba(52,211,153,0.2); }
-    .device-item.active { background: var(--exit-dim); border-color: var(--exit-color); }
-    .device-item.loading { opacity: 0.6; pointer-events: none; }
-    .device-icon { width: 32px; height: 32px; border-radius: 6px; background: var(--bg-3); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .device-icon.exit { background: var(--exit-dim); }
-    .device-info { flex: 1; min-width: 0; }
-    .device-name { font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .device-ip { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
-    .device-badge {
-      font-size: 10px; padding: 2px 6px; border-radius: 4px; flex-shrink: 0;
-      background: var(--exit-dim); color: var(--exit-color); font-weight: 600;
-    }
-    .online-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
-    .online-dot.off { background: var(--text-muted); }
-    .section-sep { font-size: 11px; color: var(--text-muted); padding: 10px 10px 4px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  /* Main content */
+  .main { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
 
-    /* ── Main Panel ── */
-    .main-panel { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+  /* Cards */
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px;
+  }
+  .card-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted); margin-bottom: 16px; }
 
-    /* ── Cards ── */
-    .card { background: var(--bg-1); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-    .card-header { padding: 14px 18px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
-    .card-header h3 { font-size: 14px; font-weight: 600; flex: 1; }
-    .card-body { padding: 18px; }
+  /* Geo info */
+  .geo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .geo-item label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 3px; }
+  .geo-item .value { font-size: 14px; font-weight: 500; }
+  .geo-item .value.ip { font-family: monospace; font-size: 15px; color: var(--accent); }
 
-    /* ── Geo card ── */
-    .geo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; }
-    .geo-item label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; display: block; margin-bottom: 4px; }
-    .geo-item .val { font-size: 15px; font-weight: 500; color: var(--text-primary); }
-    .geo-item .val.ip { font-family: monospace; font-size: 16px; color: var(--accent); }
-    .geo-item .val.coords { font-size: 13px; font-family: monospace; color: var(--text-secondary); }
+  /* Device table */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; padding: 8px 12px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+  }
+  td { padding: 10px 12px; border-bottom: 1px solid rgba(45,49,72,0.5); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+  .status-up { color: var(--green); font-weight: 600; }
+  .ping { font-family: monospace; }
+  .ip-cell { font-family: monospace; color: var(--accent); }
+  .mac-cell { font-family: monospace; font-size: 11px; color: var(--muted); }
 
-    /* ── LAN table ── */
-    .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; }
-    thead tr { border-bottom: 1px solid var(--border); }
-    th { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; text-align: left; padding: 8px 12px; }
-    td { padding: 9px 12px; border-bottom: 1px solid rgba(45,58,82,0.5); font-size: 13px; }
-    tr:last-child td { border-bottom: none; }
-    tr:hover td { background: rgba(255,255,255,0.02); }
-    .status-up { color: var(--success); font-weight: 600; }
-    .status-down { color: var(--danger); }
-    .mono { font-family: monospace; font-size: 12px; }
+  /* Empty / loading states */
+  .empty-state {
+    text-align: center; padding: 48px 24px; color: var(--muted);
+  }
+  .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+  .empty-state p { font-size: 14px; }
+  .spinner {
+    display: inline-block; width: 20px; height: 20px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Empty / loading states ── */
-    .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
-    .empty-state svg { margin: 0 auto 16px; display: block; opacity: 0.4; }
-    .empty-state h3 { font-size: 16px; color: var(--text-secondary); margin-bottom: 8px; }
-    .spinner-wrap { display: flex; align-items: center; justify-content: center; padding: 60px; }
-    .spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+  /* Refresh bar */
+  .refresh-bar {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; color: var(--muted);
+  }
+  .refresh-bar .countdown { font-weight: 600; color: var(--text); min-width: 20px; }
 
-    /* ── Login page ── */
-    .login-page { display: flex; align-items: center; justify-content: center; height: 100vh; background: var(--bg-0); }
-    .login-card { background: var(--bg-1); border: 1px solid var(--border); border-radius: 14px; padding: 48px 40px; text-align: center; max-width: 380px; width: 100%; }
-    .login-card h1 { font-size: 24px; margin-bottom: 8px; }
-    .login-card p { color: var(--text-muted); margin-bottom: 28px; line-height: 1.5; }
-    .login-card .btn-primary { padding: 12px 28px; font-size: 15px; width: 100%; }
-
-    /* ── Subnet badge ── */
-    .subnet-badge { font-family: monospace; font-size: 12px; background: var(--bg-3); padding: 3px 8px; border-radius: 5px; color: var(--text-secondary); }
-
-    /* ── Toast ── */
-    #toast {
-      position: fixed; bottom: 24px; right: 24px; z-index: 9999;
-      background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px;
-      padding: 12px 18px; font-size: 13px; display: none;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-    }
-    #toast.show { display: block; animation: fadeIn 0.2s; }
-    #toast.error { border-color: var(--danger); color: var(--danger); }
-    #toast.success { border-color: var(--success); color: var(--success); }
-    @keyframes fadeIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform:none; } }
-
-    /* ── Scrollbar ── */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--border); }
-
-    .tag-self { font-size: 10px; padding: 2px 5px; border-radius: 3px; background: var(--accent-dim); color: var(--accent); font-weight: 600; margin-left: 4px; }
-  </style>
+  /* Disconnect prompt */
+  #no-exit-msg {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    flex: 1; text-align: center; gap: 12px; color: var(--muted);
+  }
+  #no-exit-msg h2 { font-size: 18px; color: var(--text); }
+  #no-exit-msg p { font-size: 14px; max-width: 320px; }
+</style>
 </head>
 <body>
-<div id="app"></div>
-<div id="toast"></div>
+
+<!-- Top bar -->
+<div class="topbar">
+  <span class="logo">🔍 TailScan</span>
+  <div class="exit-status">
+    <div class="dot" id="exit-dot"></div>
+    <span id="exit-label">Not connected to exit node</span>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn btn-danger" id="disconnect-btn" style="display:none" onclick="disconnectExit()">Disconnect</button>
+  <span style="font-size:13px; color:var(--muted); margin-left:8px;">{{ user.name }}</span>
+  <a href="/logout"><button class="btn btn-ghost">Logout</button></a>
+</div>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>Tailnet Devices</h2>
+      <button class="btn btn-ghost" onclick="loadPeers()" style="padding:4px 8px; font-size:11px;">↺</button>
+    </div>
+    <div class="sidebar-list" id="peer-list">
+      <div style="padding:20px; text-align:center; color:var(--muted);"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="main" id="main-content">
+    <div id="no-exit-msg">
+      <div style="font-size:56px;">🛰️</div>
+      <h2>Select an Exit Node</h2>
+      <p>Click an exit node on the left to connect and scan its LAN.</p>
+    </div>
+  </div>
+
+</div>
 
 <script>
-// ── State ──────────────────────────────────────────────────────────────────
-const state = {
-  peers: [],
-  activePeer: null,
-  scanData: null,
-  scanning: false,
-  connecting: null,
-  countdown: 30,
-  scanError: null,
-};
-
+let currentExitNode = null;
+let refreshInterval = null;
 let countdownInterval = null;
-let scanTimeout = null;
+let countdown = 30;
 
-// ── Render ─────────────────────────────────────────────────────────────────
-function render() {
-  const app = document.getElementById('app');
-  app.innerHTML = `
-    <div class="app">
-      ${renderTopBar()}
-      <div class="body">
-        ${renderLeftPanel()}
-        <div class="main-panel" id="main-panel">
-          ${renderMain()}
-        </div>
-      </div>
-    </div>
-  `;
-  attachEvents();
+// ── Peers ────────────────────────────────────────────────────────────────────
+
+async function loadPeers() {
+  const list = document.getElementById('peer-list');
+  list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)"><div class="spinner"></div></div>';
+  try {
+    const r = await fetch('/api/peers');
+    const d = await r.json();
+    currentExitNode = d.current_exit_node;
+    updateTopbar(currentExitNode, d.peers);
+    renderPeers(d.peers, d.current_exit_node);
+  } catch(e) {
+    list.innerHTML = '<div style="padding:16px;color:var(--red);font-size:13px;">Failed to load peers</div>';
+  }
 }
 
-function renderTopBar() {
-  const node = state.activePeer;
-  const nodeHtml = node
-    ? `<div class="topbar-node"><div class="dot"></div>${escHtml(node.hostname || node.dns_name)}</div>
-       <button class="btn-ghost btn-danger" id="btn-disconnect">Disconnect</button>`
-    : `<div class="topbar-node none"><div class="dot off"></div>No exit node</div>`;
+function renderPeers(peers, activeExit) {
+  const list = document.getElementById('peer-list');
+  const exitNodes = peers.filter(p => p.exit_node_option && !p.self);
+  const others = peers.filter(p => !p.exit_node_option || p.self);
 
-  const scanLabel = state.scanning ? 'Scanning…' : `Refresh in ${state.countdown}s`;
-  return `
-    <div class="topbar">
-      <div class="topbar-logo">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
-          <path d="M2 12h20"/>
-        </svg>
-        TailScan
-      </div>
-      <div class="topbar-sep"></div>
-      ${nodeHtml}
-      <div class="refresh-badge ${state.scanning ? 'scanning' : ''}" id="refresh-badge">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-          <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-        </svg>
-        ${escHtml(scanLabel)}
-      </div>
-      <button class="btn-ghost" id="btn-refresh" ${state.scanning ? 'disabled' : ''}>↻ Scan now</button>
-      <a href="/auth/logout"><button class="btn-ghost">Logout</button></a>
-    </div>
-  `;
+  let html = '';
+
+  if (exitNodes.length) {
+    html += '<div class="section-label">Exit Nodes</div>';
+    for (const p of exitNodes) {
+      const isActive = p.exit_node || p.ip === activeExit;
+      html += peerHTML(p, isActive, true);
+    }
+  }
+
+  if (others.length) {
+    html += '<div class="section-label">Devices</div>';
+    for (const p of others) {
+      html += peerHTML(p, false, false);
+    }
+  }
+
+  list.innerHTML = html || '<div style="padding:16px;color:var(--muted);font-size:13px;">No devices found</div>';
 }
 
-function renderLeftPanel() {
-  const exitNodes = state.peers.filter(p => p.is_exit_node);
-  const others = state.peers.filter(p => !p.is_exit_node && !p.is_self);
-  const self = state.peers.find(p => p.is_self);
-
-  const renderDevice = (p) => {
-    const isActive = p.is_active_exit_node;
-    const cls = [
-      'device-item',
-      p.is_exit_node ? 'exit-node' : '',
-      isActive ? 'active' : '',
-      state.connecting === p.ip ? 'loading' : '',
-    ].filter(Boolean).join(' ');
-    const iconBg = p.is_exit_node ? 'exit' : '';
-    const badge = p.is_exit_node ? '<span class="device-badge">EXIT</span>' : '';
-    const selfTag = p.is_self ? '<span class="tag-self">YOU</span>' : '';
-    return `
-      <div class="${cls}" data-ip="${escHtml(p.ip)}" data-exit="${p.is_exit_node ? '1' : '0'}">
-        <div class="device-icon ${iconBg}">
-          ${p.is_exit_node
-            ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${isActive ? 'var(--exit-color)' : 'var(--text-muted)'}" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>`
-            : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>`
-          }
-        </div>
-        <div class="device-info">
-          <div class="device-name">${escHtml(p.hostname || p.dns_name || p.ip)}${selfTag}</div>
-          <div class="device-ip">${escHtml(p.ip)}</div>
-        </div>
-        ${badge}
-        <div class="online-dot ${p.is_online ? '' : 'off'}"></div>
-      </div>
-    `;
-  };
-
+function peerHTML(p, isActive, isExitNode) {
+  const onclick = isExitNode && !p.self ? `onclick="connectExit('${p.ip}', '${p.hostname}')"` : '';
+  const cursor = isExitNode && !p.self ? '' : 'cursor:default;';
   return `
-    <div class="left-panel">
-      <div class="panel-header"><h2>Tailnet Devices</h2></div>
-      <div class="device-list">
-        ${exitNodes.length ? `<div class="section-sep">Exit Nodes</div>` : ''}
-        ${exitNodes.map(renderDevice).join('')}
-        ${(others.length || self) ? `<div class="section-sep">Devices</div>` : ''}
-        ${self ? renderDevice(self) : ''}
-        ${others.map(renderDevice).join('')}
-        ${state.peers.length === 0 ? `<div style="padding:20px;color:var(--text-muted);text-align:center;font-size:13px;">Loading devices…</div>` : ''}
+    <div class="peer-item ${isActive ? 'active-exit' : ''}" ${onclick} style="${cursor}">
+      <div class="peer-dot ${p.online ? 'online' : ''}"></div>
+      <div class="peer-info">
+        <div class="peer-name">${escHtml(p.hostname)}</div>
+        <div class="peer-ip">${p.ip}</div>
+        <div class="peer-badges">
+          ${p.self ? '<span class="badge badge-self">this device</span>' : ''}
+          ${isExitNode ? '<span class="badge badge-exit">exit node</span>' : ''}
+          ${p.os ? `<span class="badge badge-os">${escHtml(p.os)}</span>` : ''}
+        </div>
       </div>
-    </div>
-  `;
+    </div>`;
 }
 
-function renderMain() {
-  if (!state.activePeer) {
-    return `
-      <div class="empty-state">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
-          <path d="M2 12h20"/>
-        </svg>
-        <h3>Select an exit node</h3>
-        <p>Click an exit node on the left to connect and start scanning its LAN.</p>
-      </div>
-    `;
+// ── Exit node control ────────────────────────────────────────────────────────
+
+async function connectExit(ip, hostname) {
+  showLoading(`Connecting to ${hostname}...`);
+  try {
+    await fetch('/api/exit-node/set', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ip})
+    });
+    currentExitNode = ip;
+    updateTopbar(ip, null, hostname);
+    await loadPeers();
+    startAutoRefresh();
+    await runScan();
+  } catch(e) {
+    showError('Failed to connect to exit node.');
+  }
+}
+
+async function disconnectExit() {
+  stopAutoRefresh();
+  await fetch('/api/exit-node/disconnect', {method: 'POST'});
+  currentExitNode = null;
+  updateTopbar(null);
+  await loadPeers();
+  document.getElementById('main-content').innerHTML = `
+    <div id="no-exit-msg">
+      <div style="font-size:56px;">🛰️</div>
+      <h2>Select an Exit Node</h2>
+      <p>Click an exit node on the left to connect and scan its LAN.</p>
+    </div>`;
+}
+
+// ── Scan ─────────────────────────────────────────────────────────────────────
+
+async function runScan() {
+  const main = document.getElementById('main-content');
+  main.innerHTML = `
+    <div style="text-align:center;padding:60px;color:var(--muted)">
+      <div class="spinner" style="width:32px;height:32px;margin:0 auto 16px"></div>
+      <p>Scanning LAN...</p>
+    </div>`;
+
+  try {
+    const r = await fetch('/api/scan');
+    const d = await r.json();
+    renderScan(d);
+    resetCountdown();
+  } catch(e) {
+    showError('Scan failed.');
+  }
+}
+
+function renderScan(d) {
+  const main = document.getElementById('main-content');
+  if (!d.connected) {
+    main.innerHTML = `
+      <div id="no-exit-msg">
+        <div style="font-size:56px;">🛰️</div>
+        <h2>Not Connected</h2>
+        <p>Select an exit node from the sidebar.</p>
+      </div>`;
+    return;
   }
 
-  const { scanData, scanning, scanError } = state;
+  const geo = d.geo || {};
+  const devices = d.devices || [];
+  const hasError = devices.length === 1 && devices[0].error;
 
-  if (!scanData && scanning) {
-    return `<div class="spinner-wrap"><div class="spinner"></div></div>`;
-  }
-
-  if (!scanData) {
-    return `
-      <div class="empty-state">
-        <h3>Connecting…</h3>
-        <p>Switching exit node. Scan will begin shortly.</p>
-      </div>
-    `;
-  }
-
-  const { geo, hosts, subnet, error: scanErr } = scanData;
-  const errBanner = (scanErr || scanError) ? `
-    <div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:12px 16px;color:var(--danger);font-size:13px;">
-      ⚠ ${escHtml(scanErr || scanError)}
+  main.innerHTML = `
+    <!-- Refresh bar -->
+    <div class="refresh-bar">
+      <span>Auto-refresh in <span class="countdown" id="countdown">30</span>s</span>
+      <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Scan now</button>
     </div>
-  ` : '';
 
-  return `
-    ${errBanner}
-    <!-- Geo card -->
+    <!-- WAN / Geo -->
     <div class="card">
-      <div class="card-header">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/></svg>
-        <h3>WAN / Geolocation</h3>
-        ${scanning ? '<div class="spinner" style="width:18px;height:18px;border-width:2px;"></div>' : ''}
-      </div>
-      <div class="card-body">
-        <div class="geo-grid">
-          <div class="geo-item"><label>WAN IP</label><div class="val ip">${escHtml(geo.ip || '—')}</div></div>
-          <div class="geo-item"><label>City</label><div class="val">${escHtml(geo.city || '—')}</div></div>
-          <div class="geo-item"><label>Region</label><div class="val">${escHtml(geo.region || '—')}</div></div>
-          <div class="geo-item"><label>Country</label><div class="val">${escHtml(geo.country || '—')}</div></div>
-          <div class="geo-item"><label>Coordinates</label><div class="val coords">${geo.lat ? `${geo.lat}, ${geo.lon}` : '—'}</div></div>
-          <div class="geo-item"><label>ISP</label><div class="val" style="font-size:13px">${escHtml(geo.isp || '—')}</div></div>
-          <div class="geo-item"><label>Timezone</label><div class="val" style="font-size:13px">${escHtml(geo.timezone || '—')}</div></div>
-        </div>
+      <div class="card-title">WAN & Location</div>
+      <div class="geo-grid">
+        <div class="geo-item"><label>WAN IP</label><div class="value ip">${escHtml(geo.ip || '—')}</div></div>
+        <div class="geo-item"><label>City</label><div class="value">${escHtml(geo.city || '—')}</div></div>
+        <div class="geo-item"><label>Region</label><div class="value">${escHtml(geo.region || '—')}</div></div>
+        <div class="geo-item"><label>Country</label><div class="value">${escHtml(geo.country || '—')}</div></div>
+        <div class="geo-item"><label>Latitude</label><div class="value">${geo.lat ?? '—'}</div></div>
+        <div class="geo-item"><label>Longitude</label><div class="value">${geo.lon ?? '—'}</div></div>
+        <div class="geo-item"><label>ISP</label><div class="value">${escHtml(geo.isp || '—')}</div></div>
+        <div class="geo-item"><label>Timezone</label><div class="value">${escHtml(geo.timezone || '—')}</div></div>
       </div>
     </div>
 
-    <!-- LAN card -->
+    <!-- LAN devices -->
     <div class="card">
-      <div class="card-header">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-        <h3>LAN Devices</h3>
-        ${subnet ? `<span class="subnet-badge">${escHtml(subnet)}</span>` : ''}
-        <span style="margin-left:auto;font-size:12px;color:var(--text-muted)">${hosts.length} host${hosts.length !== 1 ? 's' : ''} found</span>
-      </div>
-      <div class="card-body" style="padding:0">
-        ${hosts.length === 0 && !scanning ? `
-          <div style="padding:32px;text-align:center;color:var(--text-muted)">No hosts found on ${escHtml(subnet || 'unknown subnet')}</div>
-        ` : `
-          <div class="table-wrap">
-            <table>
+      <div class="card-title">LAN Devices — ${escHtml(d.subnet || 'subnet unknown')} (${devices.length} found)</div>
+      ${hasError
+        ? `<div style="color:var(--red);font-size:13px;">${escHtml(devices[0].error)}</div>`
+        : devices.length === 0
+          ? `<div class="empty-state"><div class="icon">📭</div><p>No devices found on subnet ${escHtml(d.subnet || '')}</p></div>`
+          : `<div class="table-wrap"><table>
               <thead><tr>
-                <th>IP Address</th>
-                <th>Hostname</th>
-                <th>Ping (ms)</th>
-                <th>MAC</th>
-                <th>Vendor</th>
-                <th>Status</th>
+                <th>IP</th><th>Hostname</th><th>Ping</th><th>MAC</th><th>Vendor</th><th>Status</th>
               </tr></thead>
               <tbody>
-                ${hosts.map(h => `
+                ${devices.map(dev => `
                   <tr>
-                    <td class="mono">${escHtml(h.ip)}</td>
-                    <td>${escHtml(h.hostname || '—')}</td>
-                    <td class="mono">${h.ping_ms != null ? h.ping_ms : '—'}</td>
-                    <td class="mono" style="font-size:11px">${escHtml(h.mac || '—')}</td>
-                    <td style="color:var(--text-secondary)">${escHtml(h.vendor || '—')}</td>
-                    <td><span class="${h.status === 'up' ? 'status-up' : 'status-down'}">${escHtml(h.status)}</span></td>
-                  </tr>
-                `).join('')}
+                    <td class="ip-cell">${escHtml(dev.ip)}</td>
+                    <td>${escHtml(dev.hostname)}</td>
+                    <td class="ping">${dev.ping_ms != null ? dev.ping_ms + ' ms' : '—'}</td>
+                    <td class="mac-cell">${escHtml(dev.mac)}</td>
+                    <td style="color:var(--muted);font-size:12px;">${escHtml(dev.vendor)}</td>
+                    <td class="status-up">●&nbsp;up</td>
+                  </tr>`).join('')}
               </tbody>
-            </table>
-          </div>
-        `}
-      </div>
-    </div>
-  `;
+            </table></div>`
+      }
+    </div>`;
 }
 
-// ── Events ──────────────────────────────────────────────────────────────────
-function attachEvents() {
-  // Disconnect button
-  const btnDisc = document.getElementById('btn-disconnect');
-  if (btnDisc) btnDisc.addEventListener('click', disconnectExitNode);
+// ── Auto-refresh ─────────────────────────────────────────────────────────────
 
-  // Refresh button
-  const btnRef = document.getElementById('btn-refresh');
-  if (btnRef) btnRef.addEventListener('click', () => triggerScan());
-
-  // Device list clicks
-  document.querySelectorAll('.device-item').forEach(el => {
-    el.addEventListener('click', () => {
-      const ip = el.dataset.ip;
-      const isExit = el.dataset.exit === '1';
-      if (!isExit || !ip) return;
-      if (state.activePeer && state.activePeer.ip === ip) return;
-      connectExitNode(ip);
-    });
-  });
-}
-
-// ── API helpers ──────────────────────────────────────────────────────────────
-async function apiFetch(url, opts = {}) {
-  const resp = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-    throw new Error(err.detail || resp.statusText);
-  }
-  return resp.json();
-}
-
-async function loadStatus() {
-  try {
-    const data = await apiFetch('/api/status');
-    state.peers = data.peers || [];
-    state.activePeer = data.active_exit_node || null;
-    render();
-  } catch (e) {
-    showToast('Failed to load status: ' + e.message, 'error');
-  }
-}
-
-async function connectExitNode(ip) {
-  state.connecting = ip;
-  render();
-  try {
-    await apiFetch('/api/exit-node/connect', { method: 'POST', body: JSON.stringify({ ip }) });
-    showToast('Switching exit node…', 'success');
-    await loadStatus();
-    triggerScan();
-  } catch (e) {
-    showToast('Failed to connect: ' + e.message, 'error');
-    state.connecting = null;
-    render();
-  }
-}
-
-async function disconnectExitNode() {
-  try {
-    await apiFetch('/api/exit-node/disconnect', { method: 'POST' });
-    state.scanData = null;
-    state.activePeer = null;
-    state.scanError = null;
-    showToast('Disconnected from exit node', 'success');
-    await loadStatus();
-  } catch (e) {
-    showToast('Failed to disconnect: ' + e.message, 'error');
-  }
-}
-
-async function triggerScan() {
-  if (!state.activePeer) return;
-  clearTimeout(scanTimeout);
-  clearInterval(countdownInterval);
-  state.scanning = true;
-  state.countdown = 30;
-  render();
-  try {
-    const data = await apiFetch('/api/scan');
-    state.scanData = data;
-    state.scanError = data.error || null;
-  } catch (e) {
-    state.scanError = e.message;
-  } finally {
-    state.scanning = false;
-    render();
-    scheduleNextScan();
-  }
-}
-
-function scheduleNextScan() {
-  state.countdown = 30;
-  clearInterval(countdownInterval);
-  clearTimeout(scanTimeout);
-
+function startAutoRefresh() {
+  stopAutoRefresh();
+  countdown = 30;
   countdownInterval = setInterval(() => {
-    state.countdown--;
-    const badge = document.getElementById('refresh-badge');
-    if (badge) badge.textContent = `Refresh in ${state.countdown}s`;
-    if (state.countdown <= 0) clearInterval(countdownInterval);
+    countdown--;
+    const el = document.getElementById('countdown');
+    if (el) el.textContent = countdown;
+    if (countdown <= 0) runScan();
   }, 1000);
-
-  scanTimeout = setTimeout(() => {
-    triggerScan();
-  }, 30000);
 }
 
-// ── Toast ────────────────────────────────────────────────────────────────────
-let toastTimer = null;
-function showToast(msg, type = '') {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.className = 'show ' + type;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.className = ''; }, 3500);
+function stopAutoRefresh() {
+  if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
 }
 
-// ── Utils ────────────────────────────────────────────────────────────────────
+function resetCountdown() {
+  countdown = 30;
+  const el = document.getElementById('countdown');
+  if (el) el.textContent = 30;
+  startAutoRefresh();
+}
+
+// ── Top bar ──────────────────────────────────────────────────────────────────
+
+function updateTopbar(exitIp, peers, hostname) {
+  const dot = document.getElementById('exit-dot');
+  const label = document.getElementById('exit-label');
+  const btn = document.getElementById('disconnect-btn');
+  if (exitIp) {
+    dot.classList.add('connected');
+    // Try to find hostname from peers
+    let name = hostname;
+    if (!name && peers) {
+      const match = peers.find(p => p.ip === exitIp);
+      if (match) name = match.hostname;
+    }
+    label.textContent = `Exit: ${name || exitIp}`;
+    btn.style.display = '';
+  } else {
+    dot.classList.remove('connected');
+    label.textContent = 'Not connected to exit node';
+    btn.style.display = 'none';
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 function escHtml(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showLoading(msg) {
+  document.getElementById('main-content').innerHTML = `
+    <div style="text-align:center;padding:60px;color:var(--muted)">
+      <div class="spinner" style="width:32px;height:32px;margin:0 auto 16px"></div>
+      <p>${escHtml(msg)}</p>
+    </div>`;
+}
+
+function showError(msg) {
+  document.getElementById('main-content').innerHTML = `
+    <div style="text-align:center;padding:60px;color:var(--red)">
+      <div style="font-size:40px;margin-bottom:12px;">⚠️</div>
+      <p>${escHtml(msg)}</p>
+    </div>`;
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-async function init() {
-  render(); // initial skeleton
-  await loadStatus();
-  if (state.activePeer) {
-    triggerScan();
-  }
-}
 
-init();
+(async () => {
+  await loadPeers();
+  if (currentExitNode) {
+    startAutoRefresh();
+    await runScan();
+  }
+})();
 </script>
 </body>
 </html>
