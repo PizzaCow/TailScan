@@ -19,15 +19,7 @@ Self-hosted web app to manage Tailscale exit nodes and scan the LAN at each remo
 - Python 3.11+
 - Git
 
-### 2. Create Tailscale OAuth credentials
-
-1. Go to [https://login.tailscale.com/admin/settings/oauth](https://login.tailscale.com/admin/settings/oauth)
-2. Create a new OAuth client
-3. Scopes needed: `openid`, `profile`, `email`
-4. Set redirect URI to: `http://<your-tailscale-ip>:8080/auth/callback`
-5. Save the **Client ID** and **Client Secret**
-
-### 3. Install
+### 2. Install
 
 ```bash
 git clone https://github.com/PizzaCow/TailScan /opt/tailscan
@@ -40,15 +32,17 @@ chmod +x start.sh update.sh
 ### 4. Configure `.env`
 
 ```env
-TAILSCALE_CLIENT_ID=your_client_id
-TAILSCALE_CLIENT_SECRET=your_client_secret
-TAILSCALE_REDIRECT_URI=http://100.x.x.x:8080/auth/callback
+PASSWORD_HASH=<sha256 of your password>
 SECRET_KEY=<random 32-char string>
 TAILNET=your-tailnet-name
 ```
 
-Generate a secret key:
+Generate values:
 ```bash
+# Password hash
+python3 -c "import hashlib; print(hashlib.sha256(b'yourpassword').hexdigest())"
+
+# Secret key
 python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
@@ -85,7 +79,7 @@ cd /opt/tailscan
 
 ## Features
 
-- **Tailscale SSO** — login with your Tailscale account, no separate passwords
+- **Password login** — simple password auth, session cookie keeps you signed in for 7 days
 - **Exit node selector** — see all tailnet devices, click to connect
 - **LAN scan** — nmap ping sweep auto-detects subnet, shows IP, hostname, ping, MAC, vendor
 - **WAN + Geo** — WAN IP, city, region, country, lat/lon, ISP, timezone via ip-api.com
