@@ -28,29 +28,54 @@ def get_wan_geo() -> dict:
         return {"ip": "error", "error": str(e)}
 
 
-def detect_lan_subnet() -> str | None:
-    """Auto-detect the LAN subnet from the routing table."""
+def detect_lan_subnet(exit_node_ip: str | None = None) -> str | None:
+    """
+    Detect the LAN subnet to scan.
+    When using an exit node, the remote LAN is not in our routing table.
+    We ask ip-api.com (via the exit node) — but for subnet detection we
+    look at what Tailscale reports as the exit node's advertised routes,
+    or fall back to a standard private-range guess based on WAN geo.
+
+    Simpler approach: use the exit node peer's AllowedIPs from tailscale status
+    to find any advertised private subnet, otherwise fall back to ip route.
+    """
+    # Try to get advertised subnet routes from tailscale status (exit node may advertise its LAN)
+    if exit_node_ip:
+        try:
+            import subprocess, json
+            result = subprocess.run(
+                ["tailscale", "status", "--json"],
+                capture_output=True, text=True, timeout=10
+            )
+            status = json.loads(result.stdout)
+            for _, peer in status.get("Peer", {}).items():
+                ips = peer.get("TailscaleIPs", [])
+                if ips and ips[0] == exit_node_ip:
+                    for route in peer.get("AllowedIPs", []):
+                        # Private subnets only, not Tailscale ranges
+                        if route.startswith("100.") or route == "0.0.0.0/0" or route == "::/0":
+                            continue
+                        if any(route.startswith(p) for p in ("10.", "172.", "192.168.")):
+                            return route
+        except Exception:
+            pass
+
+    # Fall back to local routing table (works when no exit node, or exit node advertises routes)
     try:
         result = subprocess.run(
             ["ip", "route"],
             capture_output=True, text=True, timeout=5
         )
         for line in result.stdout.splitlines():
-            # Look for default route via an exit node, or just grab non-tailscale, non-default subnets
-            # Skip Tailscale ranges (100.64.0.0/10) and loopback
             parts = line.split()
             if not parts:
                 continue
             subnet = parts[0]
             if subnet == "default":
                 continue
-            # Skip tailscale subnet
-            if subnet.startswith("100."):
+            if subnet.startswith("100.") or subnet.startswith("127."):
                 continue
-            if subnet.startswith("127."):
-                continue
-            # Must be a real subnet (contains /)
-            if "/" in subnet:
+            if "/" in subnet and any(subnet.startswith(p) for p in ("10.", "172.", "192.168.")):
                 return subnet
         return None
     except Exception:
