@@ -106,16 +106,18 @@ def api_scan(request: Request):
             "subnet": None,
         }
 
-    subnet = scanner.detect_lan_subnet()
+    subnet = scanner.detect_lan_subnet(exit_node_ip=current_exit)
     devices = []
     if subnet:
         devices = scanner.scan_lan(subnet)
+    else:
+        devices = [{"error": "Could not detect LAN subnet. The exit node may not be advertising its local routes."}]
 
     return {
         "connected": True,
         "exit_node_ip": current_exit,
         "geo": geo,
-        "subnet": subnet,
+        "subnet": subnet or "unknown",
         "devices": devices,
     }
 
