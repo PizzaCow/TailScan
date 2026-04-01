@@ -4,9 +4,8 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi import FastAPI, Request, Response, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import auth
 import tailscale
@@ -15,42 +14,26 @@ import scanner
 app = FastAPI(title="TailScan")
 templates = Jinja2Templates(directory="templates")
 
-CLIENT_ID = os.getenv("TAILSCALE_CLIENT_ID", "")
-CLIENT_SECRET = os.getenv("TAILSCALE_CLIENT_SECRET", "")
-REDIRECT_URI = os.getenv("TAILSCALE_REDIRECT_URI", "http://localhost:8080/auth/callback")
-TAILNET = os.getenv("TAILNET", "-")  # "-" = current tailnet
 
-
-def get_session(request: Request) -> dict | None:
+def get_session(request: Request) -> bool:
     cookie = request.cookies.get("ts_session")
     if not cookie:
-        return None
-    return auth.decode_session_cookie(cookie)
+        return False
+    return auth.validate_session_cookie(cookie)
 
 
 # ─── Auth routes ────────────────────────────────────────────────────────────
 
-@app.get("/login")
-def login():
-    url, _ = auth.generate_oauth_url(CLIENT_ID, REDIRECT_URI)
-    return RedirectResponse(url)
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, error: str = ""):
+    return templates.TemplateResponse("login.html", {"request": request, "error": error})
 
 
-@app.get("/auth/callback")
-def auth_callback(request: Request, code: str = "", state: str = "", error: str = ""):
-    if error:
-        raise HTTPException(400, f"OAuth error: {error}")
-    if not code:
-        raise HTTPException(400, "Missing code")
-
-    try:
-        tokens = auth.exchange_code(CLIENT_ID, CLIENT_SECRET, code, REDIRECT_URI)
-        access_token = tokens.get("access_token", "")
-        user_info = auth.get_userinfo(access_token)
-    except Exception as e:
-        raise HTTPException(500, f"Auth failed: {e}")
-
-    cookie_val = auth.make_session_cookie(user_info, access_token)
+@app.post("/login")
+async def login_submit(request: Request, password: str = Form(...)):
+    if not auth.check_password(password):
+        return RedirectResponse("/login?error=Invalid+password", status_code=302)
+    cookie_val = auth.make_session_cookie()
     response = RedirectResponse("/", status_code=302)
     response.set_cookie(
         "ts_session", cookie_val,
@@ -71,13 +54,9 @@ def logout():
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
-    session = get_session(request)
-    if not session:
+    if not get_session(request):
         return RedirectResponse("/login")
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "user": session,
-    })
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 # ─── API endpoints ──────────────────────────────────────────────────────────
@@ -139,13 +118,6 @@ def api_scan(request: Request):
         "subnet": subnet,
         "devices": devices,
     }
-
-
-@app.get("/api/geo")
-def api_geo(request: Request):
-    if not get_session(request):
-        raise HTTPException(401)
-    return scanner.get_wan_geo()
 
 
 if __name__ == "__main__":
