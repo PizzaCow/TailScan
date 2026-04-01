@@ -48,6 +48,7 @@ def get_local_status() -> dict:
 
 def set_exit_node(ip: str) -> bool:
     """Set exit node by IP. Pass empty string to disconnect."""
+    import time
     if ip:
         result = subprocess.run(
             ["tailscale", "set", f"--exit-node={ip}"],
@@ -58,6 +59,7 @@ def set_exit_node(ip: str) -> bool:
             ["tailscale", "set", "--exit-node="],
             capture_output=True, text=True, timeout=15
         )
+    time.sleep(1)  # give tailscaled a moment to update status
     return result.returncode == 0
 
 
@@ -65,13 +67,10 @@ def get_current_exit_node() -> str | None:
     """Return current exit node IP, or None if not set."""
     try:
         status = get_local_status()
-        peer = status.get("ExitNodeStatus")
-        if peer and peer.get("Active"):
-            # Find matching peer
-            for _, p in status.get("Peer", {}).items():
-                if p.get("ExitNode"):
-                    ips = p.get("TailscaleIPs", [])
-                    return ips[0] if ips else None
+        for _, p in status.get("Peer", {}).items():
+            if p.get("ExitNode"):
+                ips = p.get("TailscaleIPs", [])
+                return ips[0] if ips else None
         return None
     except Exception:
         return None
