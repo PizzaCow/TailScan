@@ -1,142 +1,134 @@
-"""
-tailscale.py — Tailscale API + CLI wrapper
-"""
-import asyncio
+"""Tailscale API + CLI wrapper."""
+
 import json
-import os
 import subprocess
-from typing import Any
-
 import httpx
+import os
 
-TS_API_BASE = "https://api.tailscale.com/api/v2"
-TS_TAILNET = os.getenv("TS_TAILNET", "-")  # '-' = default tailnet
-TS_CLIENT_ID = os.getenv("TS_CLIENT_ID", "")
-TS_CLIENT_SECRET = os.getenv("TS_CLIENT_SECRET", "")
-
-# Token cache
-_api_token: str | None = None
+TAILSCALE_API_BASE = "https://api.tailscale.com/api/v2"
 
 
-async def get_api_token() -> str:
-    """Get a fresh OAuth token using client credentials flow."""
-    global _api_token
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "https://login.tailscale.com/oauth/token",
-            data={
-                "grant_type": "client_credentials",
-                "client_id": TS_CLIENT_ID,
-                "client_secret": TS_CLIENT_SECRET,
-            },
-        )
-        resp.raise_for_status()
-        _api_token = resp.json()["access_token"]
-    return _api_token
-
-
-async def _api_get(path: str) -> Any:
-    """Make authenticated GET to Tailscale API."""
-    token = await get_api_token()
-    url = f"{TS_API_BASE}{path}"
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
-        resp.raise_for_status()
-        return resp.json()
-
-
-async def list_devices() -> list[dict]:
-    """Return all devices in the tailnet."""
-    data = await _api_get(f"/tailnet/{TS_TAILNET}/devices")
-    devices = data.get("devices", [])
-    return devices
-
-
-async def get_tailnet_status() -> dict:
-    """
-    Run `tailscale status --json` locally and return parsed data.
-    This gives real-time peer info including exit node status.
-    """
-    proc = await asyncio.create_subprocess_exec(
-        "tailscale", "status", "--json",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+def get_access_token(client_id: str, client_secret: str, code: str, redirect_uri: str) -> dict:
+    """Exchange OAuth code for access token."""
+    resp = httpx.post(
+        "https://api.tailscale.com/api/v2/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        },
     )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(f"tailscale status failed: {stderr.decode()}")
-    return json.loads(stdout.decode())
+    resp.raise_for_status()
+    return resp.json()
 
 
-def parse_peers(status: dict) -> list[dict]:
-    """
-    Parse tailscale status JSON into a list of peer dicts with:
-    - id, hostname, dns_name, ip, is_exit_node, is_online, is_active_exit_node
-    """
-    peers = []
-    self_node = status.get("Self", {})
-    current_exit = status.get("CurrentExitNode", {})
-    current_exit_id = current_exit.get("ID", "") if current_exit else ""
-
-    # Include self
-    self_entry = {
-        "id": self_node.get("ID", ""),
-        "hostname": self_node.get("HostName", ""),
-        "dns_name": self_node.get("DNSName", "").rstrip("."),
-        "ip": (self_node.get("TailscaleIPs") or [""])[0],
-        "is_exit_node": False,
-        "is_active_exit_node": False,
-        "is_online": True,
-        "is_self": True,
-    }
-    peers.append(self_entry)
-
-    for peer_id, peer in (status.get("Peer") or {}).items():
-        exit_node = peer.get("ExitNodeOption", False)
-        ips = peer.get("TailscaleIPs") or []
-        entry = {
-            "id": peer.get("ID", peer_id),
-            "hostname": peer.get("HostName", ""),
-            "dns_name": peer.get("DNSName", "").rstrip("."),
-            "ip": ips[0] if ips else "",
-            "is_exit_node": exit_node,
-            "is_active_exit_node": peer.get("ExitNode", False),
-            "is_online": peer.get("Online", False),
-            "is_self": False,
-        }
-        peers.append(entry)
-
-    return peers
+def get_devices(tailnet: str, access_token: str) -> list[dict]:
+    """Get all devices on the tailnet."""
+    resp = httpx.get(
+        f"{TAILSCALE_API_BASE}/tailnet/{tailnet}/devices",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("devices", [])
 
 
-async def set_exit_node(ip: str) -> bool:
-    """
-    Set the active exit node to the given Tailscale IP.
-    Pass empty string to disconnect.
-    """
+def get_local_status() -> dict:
+    """Get local tailscale status."""
+    result = subprocess.run(
+        ["tailscale", "status", "--json"],
+        capture_output=True, text=True, timeout=10
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"tailscale status failed: {result.stderr}")
+    return json.loads(result.stdout)
+
+
+def set_exit_node(ip: str) -> bool:
+    """Set exit node by IP. Pass empty string to disconnect."""
     if ip:
-        cmd = ["tailscale", "set", f"--exit-node={ip}"]
+        result = subprocess.run(
+            ["tailscale", "set", f"--exit-node={ip}"],
+            capture_output=True, text=True, timeout=15
+        )
     else:
-        cmd = ["tailscale", "set", "--exit-node="]
-
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        err = stderr.decode().strip()
-        raise RuntimeError(f"tailscale set --exit-node failed: {err}")
-    return True
+        result = subprocess.run(
+            ["tailscale", "set", "--exit-node="],
+            capture_output=True, text=True, timeout=15
+        )
+    return result.returncode == 0
 
 
-async def get_active_exit_node(status: dict | None = None) -> dict | None:
-    """Return the currently active exit node peer dict, or None."""
-    if status is None:
-        status = await get_tailnet_status()
-    peers = parse_peers(status)
-    for p in peers:
-        if p["is_active_exit_node"]:
-            return p
-    return None
+def get_current_exit_node() -> str | None:
+    """Return current exit node IP, or None if not set."""
+    try:
+        status = get_local_status()
+        peer = status.get("ExitNodeStatus")
+        if peer and peer.get("Active"):
+            # Find matching peer
+            for _, p in status.get("Peer", {}).items():
+                if p.get("ExitNode"):
+                    ips = p.get("TailscaleIPs", [])
+                    return ips[0] if ips else None
+        return None
+    except Exception:
+        return None
+
+
+def get_exit_nodes_local() -> list[dict]:
+    """Get exit nodes from local tailscale status."""
+    try:
+        status = get_local_status()
+        nodes = []
+        for node_id, peer in status.get("Peer", {}).items():
+            if peer.get("ExitNodeOption"):
+                ips = peer.get("TailscaleIPs", [])
+                nodes.append({
+                    "id": node_id,
+                    "hostname": peer.get("HostName", "unknown"),
+                    "dns_name": peer.get("DNSName", ""),
+                    "ip": ips[0] if ips else "",
+                    "online": peer.get("Online", False),
+                    "active": peer.get("ExitNode", False),
+                    "os": peer.get("OS", ""),
+                })
+        return nodes
+    except Exception:
+        return []
+
+
+def get_all_peers_local() -> list[dict]:
+    """Get all peers from local tailscale status."""
+    try:
+        status = get_local_status()
+        peers = []
+        # Add self
+        s = status.get("Self", {})
+        ips = s.get("TailscaleIPs", [])
+        peers.append({
+            "hostname": s.get("HostName", "self"),
+            "dns_name": s.get("DNSName", ""),
+            "ip": ips[0] if ips else "",
+            "online": True,
+            "exit_node": False,
+            "exit_node_option": False,
+            "os": s.get("OS", ""),
+            "self": True,
+        })
+        for _, peer in status.get("Peer", {}).items():
+            ips = peer.get("TailscaleIPs", [])
+            peers.append({
+                "hostname": peer.get("HostName", "unknown"),
+                "dns_name": peer.get("DNSName", ""),
+                "ip": ips[0] if ips else "",
+                "online": peer.get("Online", False),
+                "exit_node": peer.get("ExitNode", False),
+                "exit_node_option": peer.get("ExitNodeOption", False),
+                "os": peer.get("OS", ""),
+                "self": False,
+            })
+        return peers
+    except Exception:
+        return []
