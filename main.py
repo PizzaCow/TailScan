@@ -1,8 +1,15 @@
 """TailScan — FastAPI app."""
 
 import os
+import logging
 from dotenv import load_dotenv
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 from fastapi import FastAPI, Request, Response, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -10,6 +17,8 @@ from fastapi.templating import Jinja2Templates
 import auth
 import tailscale
 import scanner
+
+log = logging.getLogger("tailscan")
 
 app = FastAPI(title="TailScan")
 templates = Jinja2Templates(directory="templates")
@@ -76,7 +85,11 @@ async def api_set_exit_node(request: Request):
         raise HTTPException(401)
     body = await request.json()
     ip = body.get("ip", "")
+    log.info(f"Setting exit node to: {ip!r}")
     ok = tailscale.set_exit_node(ip)
+    log.info(f"set_exit_node returned: {ok}")
+    current = tailscale.get_current_exit_node()
+    log.info(f"get_current_exit_node after set: {current!r}")
     if not ok:
         raise HTTPException(500, "Failed to set exit node")
     return {"ok": True, "exit_node": ip or None}
@@ -95,8 +108,11 @@ def api_scan(request: Request):
     if not get_session(request):
         raise HTTPException(401)
 
+    log.info("Starting scan...")
     geo = scanner.get_wan_geo()
+    log.info(f"WAN geo: {geo}")
     current_exit = tailscale.get_current_exit_node()
+    log.info(f"Current exit node: {current_exit!r}")
 
     if not current_exit:
         return {
@@ -107,10 +123,14 @@ def api_scan(request: Request):
         }
 
     subnet = scanner.detect_lan_subnet(exit_node_ip=current_exit)
+    log.info(f"Detected subnet: {subnet!r}")
     devices = []
     if subnet:
+        log.info(f"Scanning subnet {subnet}...")
         devices = scanner.scan_lan(subnet)
+        log.info(f"Scan returned {len(devices)} devices")
     else:
+        log.warning("Could not detect subnet")
         devices = [{"error": "Could not detect LAN subnet. The exit node may not be advertising its local routes."}]
 
     return {
