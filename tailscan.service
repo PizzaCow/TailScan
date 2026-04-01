@@ -1,5 +1,5 @@
 [Unit]
-Description=TailScan — Tailscale Network Scanner
+Description=TailScan — Tailscale LAN Scanner
 After=network.target tailscaled.service
 Wants=tailscaled.service
 
@@ -7,15 +7,9 @@ Wants=tailscaled.service
 Type=simple
 User=root
 WorkingDirectory=/opt/tailscan
-EnvironmentFile=/opt/tailscan/.env
-ExecStart=/opt/tailscan/venv/bin/python /opt/tailscan/main.py
+ExecStart=/usr/bin/python3 /opt/tailscan/main.py
 Restart=on-failure
-RestartSec=5s
-StandardOutput=journal
-StandardError=journal
-
-# Allow nmap raw sockets (needs root or CAP_NET_RAW)
-# If running as non-root, add: AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
