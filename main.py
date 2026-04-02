@@ -30,7 +30,17 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 log = logging.getLogger("tailscan")
 
-app = FastAPI(title="TailScan")
+from contextlib import asynccontextmanager
+import asyncio as _asyncio
+
+@asynccontextmanager
+async def lifespan(app):
+    # Start SOCKS5 proxy in the background
+    import socks5
+    _asyncio.create_task(socks5.start_socks5_server())
+    yield
+
+app = FastAPI(title="TailScan", lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 
 
@@ -573,6 +583,22 @@ GUAC_ADMIN_PASS = os.getenv("GUAC_ADMIN_PASS", "guacadmin")
 
 _guac_token_cache: dict = {}  # {"token": str, "expires": float}
 
+# ─── Browser session management ─────────────────────────────────────────────
+import subprocess, socket, secrets as _secrets
+BROWSER_IMAGE = os.getenv("BROWSER_IMAGE", "tailscan-browser:latest")
+BROWSER_VNC_PASSWORD = os.getenv("BROWSER_VNC_PASSWORD", "tailscan")
+_browser_sessions: dict = {}  # target_url -> {container_id, vnc_port, conn_id}
+
+def _find_free_port(start: int = 5910, end: int = 5990) -> int:
+    for port in range(start, end):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError("No free VNC ports available")
+
 
 async def _guac_token(client: httpx.AsyncClient) -> str:
     """Get a Guacamole API auth token, reusing if still valid."""
@@ -680,6 +706,129 @@ async def api_guac_connect(request: Request, ip: str, port: int, proto: str):
     except Exception as e:
         log.error(f"Guacamole connect error: {e}")
         raise HTTPException(502, str(e))
+
+
+@app.get("/api/browse-session")
+async def api_browse_session(request: Request, url: str, width: int = 1280, height: int = 800):
+    """
+    Spin up (or reuse) a LibreWolf VNC container pre-navigated to `url`,
+    create a Guacamole VNC connection for it, and return the Guacamole client URL.
+    """
+    if not get_session(request):
+        raise HTTPException(401)
+
+    # Reuse existing session for the same URL if container is still running
+    if url in _browser_sessions:
+        s = _browser_sessions[url]
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "-f", "{{.State.Running}}", s["container_id"]],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip() == "true":
+                conn_id = s["conn_id"]
+                import base64
+                client_id = base64.b64encode(
+                    f"{conn_id}\0c\0postgresql".encode()
+                ).decode().rstrip("=")
+                request_host = request.headers.get("host", "localhost").split(":")[0]
+                guac_url = f"http://{request_host}:8085/guacamole/#/client/{client_id}"
+                return {"url": f"/guac-launch?target={guac_url}&proto=vnc"}
+        except Exception:
+            pass
+        # Container died — clean up
+        _browser_sessions.pop(url, None)
+
+    vnc_port = _find_free_port()
+    conn_name = f"tailscan-browse-{vnc_port}"
+
+    # Start the container
+    try:
+        result = subprocess.run([
+            "docker", "run", "-d", "--rm",
+            "--name", conn_name,
+            "-p", f"127.0.0.1:{vnc_port}:5900",
+            "-e", f"URL={url}",
+            "-e", f"GEOMETRY={width}x{height}",
+            "-e", f"VNC_PASSWORD={BROWSER_VNC_PASSWORD}",
+            BROWSER_IMAGE,
+        ], capture_output=True, text=True, timeout=15)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip())
+        container_id = result.stdout.strip()
+    except Exception as e:
+        raise HTTPException(500, f"Failed to start browser container: {e}")
+
+    # Give the container a moment to start VNC
+    import asyncio
+    await asyncio.sleep(3)
+
+    # Register in Guacamole
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            token = await _guac_token(client)
+            payload = {
+                "name": conn_name,
+                "protocol": "vnc",
+                "parameters": {
+                    "hostname": "127.0.0.1",
+                    "port": str(vnc_port),
+                    "password": BROWSER_VNC_PASSWORD,
+                    "color-depth": "24",
+                },
+                "attributes": {
+                    "max-connections": "2",
+                    "max-connections-per-user": "2",
+                },
+                "parentIdentifier": "ROOT",
+            }
+            r = await client.post(
+                f"{GUAC_BASE}/api/session/data/postgresql/connections",
+                params={"token": token},
+                json=payload,
+            )
+            r.raise_for_status()
+            conn_id = r.json()["identifier"]
+    except Exception as e:
+        # Kill container if Guacamole registration fails
+        subprocess.run(["docker", "stop", container_id], capture_output=True)
+        raise HTTPException(502, f"Guacamole registration failed: {e}")
+
+    _browser_sessions[url] = {
+        "container_id": container_id,
+        "vnc_port": vnc_port,
+        "conn_id": conn_id,
+        "conn_name": conn_name,
+    }
+
+    import base64
+    client_id = base64.b64encode(
+        f"{conn_id}\0c\0postgresql".encode()
+    ).decode().rstrip("=")
+    request_host = request.headers.get("host", "localhost").split(":")[0]
+    guac_url = f"http://{request_host}:8085/guacamole/#/client/{client_id}"
+    return {"url": f"/guac-launch?target={guac_url}&proto=vnc"}
+
+
+@app.delete("/api/browse-session")
+async def api_browse_session_delete(request: Request, url: str):
+    """Kill the browser container for a given URL and clean up the Guacamole connection."""
+    if not get_session(request):
+        raise HTTPException(401)
+    s = _browser_sessions.pop(url, None)
+    if not s:
+        return {"status": "not_found"}
+    subprocess.run(["docker", "stop", s["container_id"]], capture_output=True)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            token = await _guac_token(client)
+            await client.delete(
+                f"{GUAC_BASE}/api/session/data/postgresql/connections/{s['conn_id']}",
+                params={"token": token},
+            )
+    except Exception:
+        pass
+    return {"status": "stopped"}
 
 
 if __name__ == "__main__":
