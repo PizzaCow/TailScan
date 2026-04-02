@@ -148,15 +148,14 @@ def api_scan(request: Request):
         count = 0
         for subnet in subnets:
             log.info(f"Scanning subnet {subnet}")
-        for subnet in subnets:
             for device in scanner.scan_lan_stream(subnet):
                 if "error" in device:
                     yield f"data: {json.dumps({'type': 'error', 'message': device['error']})}\n\n"
                     return
                 device["type"] = "device"
                 count += 1
-            log.info(f"Device: {device.get('ip')} ({device.get('hostname')})")
-            yield f"data: {json.dumps(device)}\n\n"
+                log.info(f"Device: {device.get('ip')} ({device.get('hostname')})")
+                yield f"data: {json.dumps(device)}\n\n"
 
         log.info(f"Scan complete: {count} devices")
         yield f"data: {json.dumps({'type': 'done', 'count': count})}\n\n"
