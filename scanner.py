@@ -1,6 +1,7 @@
-"""LAN scanner using nmap + WAN/geo via ip-api.com."""
+"""LAN scanner using fping (discovery) + nmap (port scan) + WAN/geo via ip-api.com."""
 
 import subprocess
+import socket
 import re
 import httpx
 import time
@@ -95,17 +96,35 @@ def detect_lan_subnet(exit_node_ip: str | None = None) -> str | None:
         return None
 
 
+def _fping_device(ip: str) -> dict:
+    """Build a device dict for a discovered IP — reverse DNS only (no ARP through tunnel)."""
+    hostname = ip
+    try:
+        hostname = socket.gethostbyaddr(ip)[0]
+    except Exception:
+        pass
+    return {
+        "ip": ip,
+        "hostname": hostname,
+        "mac": "N/A",
+        "vendor": "N/A (routed)",
+        "ping_ms": None,
+        "status": "up",
+    }
+
+
 def scan_lan(subnet: str) -> list[dict]:
-    """Fast ping sweep — discovers live hosts."""
+    """Fast fping ping sweep — discovers live hosts."""
     try:
         result = subprocess.run(
-            ["nmap", "-sn", "-T5", "--min-parallelism", "100", "--max-parallelism", "256",
-             "-oX", "-", subnet],
+            ["fping", "-a", "-g", subnet],
             capture_output=True, text=True, timeout=60
         )
-        return _parse_nmap_xml(result.stdout)
+        ips = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        ips.sort(key=lambda x: tuple(int(o) for o in x.split(".")))
+        return [_fping_device(ip) for ip in ips]
     except FileNotFoundError:
-        return [{"error": "nmap not found — run start.sh to install"}]
+        return [{"error": "fping not found — run: apt install fping"}]
     except subprocess.TimeoutExpired:
         return [{"error": "scan timed out"}]
     except Exception as e:
@@ -114,39 +133,21 @@ def scan_lan(subnet: str) -> list[dict]:
 
 def scan_lan_stream(subnet: str) -> Generator[dict, None, None]:
     """
-    Stream nmap ping sweep — emits one device per host as nmap finds it.
-    nmap flushes each <host>...</host> block to XML stdout as it completes.
+    Stream fping ping sweep — emits one device per line as fping finds it.
+    fping -a outputs each alive host immediately as it responds.
     """
-    cmd = [
-        "nmap", "-sn", "-T5",
-        "--min-parallelism", "100", "--max-parallelism", "256",
-        "-oX", "-", subnet
-    ]
+    cmd = ["fping", "-a", "-g", subnet]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     except FileNotFoundError:
-        yield {"error": "nmap not found — run start.sh to install"}
+        yield {"error": "fping not found — run: apt install fping"}
         return
 
-    in_host = False
-    host_buf = ""
     try:
         for line in proc.stdout:
-            stripped = line.strip()
-            if "<host " in stripped or stripped == "<host>":
-                in_host = True
-                host_buf = line
-            elif in_host:
-                host_buf += line
-                if "</host>" in stripped:
-                    in_host = False
-                    try:
-                        devices = _parse_nmap_xml(f"<nmaprun>{host_buf}</nmaprun>")
-                        for d in devices:
-                            yield d
-                    except Exception:
-                        pass
-                    host_buf = ""
+            ip = line.strip()
+            if ip:
+                yield _fping_device(ip)
     except Exception as e:
         yield {"error": str(e)}
     finally:
