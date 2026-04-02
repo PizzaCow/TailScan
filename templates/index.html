@@ -119,8 +119,8 @@
   .status-up { color: var(--green); font-weight: 600; }
   .ip-cell { font-family: monospace; color: var(--accent); white-space: nowrap; }
 
-  /* Hide empty rows (default on) */
-  tr.no-ports { display: none; }
+  /* Hide empty rows (default on) — only after port scan has completed */
+  tr.no-ports:not(.scanning) { display: none; }
   body.show-empty tr.no-ports { display: table-row; }
 
   /* Port chips */
@@ -428,7 +428,7 @@ function runScan() {
       if (isNew) {
         const row = document.createElement('tr');
         row.id = `row-${key}`;
-        row.className = 'device-row';
+        row.className = 'device-row scanning';
         row.innerHTML = deviceRowHTML(d);
 
         // Insert sorted by IP
@@ -543,15 +543,17 @@ async function portScan(ip) {
     const d = await r.json();
     if (d.error) {
       cell.innerHTML = `<span style="color:var(--red);font-size:11px;">⚠ ${escHtml(d.error)}</span>`;
+      const row = document.getElementById(`row-${key}`);
+      if (row) row.classList.remove('scanning');
     } else {
       const ports = d.open_ports || [];
+      const row = document.getElementById(`row-${key}`);
+      if (row) row.classList.remove('scanning');
       if (ports.length === 0) {
         cell.innerHTML = `<span style="color:var(--muted);font-size:11px;">—</span>`;
-        const row = document.getElementById(`row-${key}`);
         if (row) row.classList.add('no-ports');
         document.getElementById('toggle-empty-btn').style.display = '';
       } else {
-        const row = document.getElementById(`row-${key}`);
         if (row) row.classList.remove('no-ports');
         const chips = ports.map(p => {
           const browsable = [
@@ -579,6 +581,8 @@ async function portScan(ip) {
     }
   } catch(e) {
     cell.innerHTML = `<span style="color:var(--red);font-size:11px;">failed</span>`;
+    const row = document.getElementById(`row-${key}`);
+    if (row) row.classList.remove('scanning');
   }
 }
 
