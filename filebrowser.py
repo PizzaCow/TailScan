@@ -110,16 +110,10 @@ def _smb_conn(host: str, username: str, password: str, port: int = 445):
         smbclient.delete_session(host, port=port)
     except Exception:
         pass
-    kwargs = {
-        "port": port,
-        "auth_protocol": "ntlm",   # force NTLM, avoid Kerberos/SPNEGO failures
-    }
+    kwargs = {"port": port}
     if username:
         kwargs["username"] = username
         kwargs["password"] = password or ""
-    else:
-        kwargs["username"] = ""
-        kwargs["password"] = ""
     smbclient.register_session(host, **kwargs)
 
 
