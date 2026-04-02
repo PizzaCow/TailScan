@@ -122,14 +122,33 @@
   /* Port chips */
   .port-chips { display: flex; flex-wrap: wrap; gap: 4px; }
   .port-chip {
+    position: relative;
     font-size: 11px; font-family: monospace; font-weight: 600;
     padding: 2px 7px; border-radius: 4px;
     background: rgba(91,110,232,0.15); color: #a5b4fc;
     border: 1px solid rgba(91,110,232,0.25);
-    cursor: default; white-space: nowrap;
+    cursor: pointer; white-space: nowrap; user-select: none;
+    text-decoration: none; display: inline-block;
   }
-  .port-chip:hover { background: rgba(91,110,232,0.28); }
-  .port-chip title { display: none; }
+  .port-chip:hover { background: rgba(91,110,232,0.35); border-color: rgba(91,110,232,0.5); color: #c7d2fe; }
+  .port-chip.no-browse { cursor: default; }
+  .port-chip.no-browse:hover { background: rgba(91,110,232,0.15); border-color: rgba(91,110,232,0.25); color: #a5b4fc; }
+
+  /* Custom tooltip */
+  .port-chip .chip-tip {
+    display: none;
+    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: #2a2d3e; color: #e2e8f0; font-size: 11px; font-family: -apple-system, sans-serif;
+    font-weight: 500; white-space: nowrap; padding: 5px 9px; border-radius: 6px;
+    border: 1px solid #3d4166; pointer-events: none; z-index: 100;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  .port-chip .chip-tip::after {
+    content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    border: 5px solid transparent; border-top-color: #3d4166;
+  }
+  .port-chip:hover .chip-tip { display: block; }
+
   .ports-scanning {
     font-size: 11px; color: var(--muted);
     display: flex; align-items: center; gap: 6px;
@@ -524,12 +543,23 @@ async function portScan(ip) {
     } else {
       const ports = d.open_ports || [];
       if (ports.length === 0) {
-        cell.innerHTML = `<span style="color:var(--muted);font-size:11px;">none</span>`;
+        cell.innerHTML = `<span style="color:var(--muted);font-size:11px;">—</span>`;
       } else {
-        // Chips with tooltip showing service name
-        const chips = ports.map(p =>
-          `<span class="port-chip" title="${escHtml(p.service)}">${p.port}</span>`
-        ).join('');
+        const chips = ports.map(p => {
+          const browsable = [80, 443, 8080, 8443, 8006, 8123, 8888, 5000, 8001, 32400, 10000, 9090, 3000].includes(p.port);
+          const tip = browsable
+            ? `${escHtml(p.service)} — click to browse`
+            : escHtml(p.service);
+          if (browsable) {
+            return `<a class="port-chip" href="/browse?ip=${encodeURIComponent(ip)}&port=${p.port}" target="_blank">
+              ${p.port}<span class="chip-tip">${tip}</span>
+            </a>`;
+          } else {
+            return `<span class="port-chip no-browse">
+              ${p.port}<span class="chip-tip">${tip}</span>
+            </span>`;
+          }
+        }).join('');
         cell.innerHTML = `<div class="port-chips">${chips}</div>`;
       }
     }
