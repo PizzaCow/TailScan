@@ -110,12 +110,23 @@ def _smb_conn(host: str, username: str, password: str, port: int = 445):
         smbclient.delete_session(host, port=port)
     except Exception:
         pass
-    smbclient.register_session(
-        host,
-        username=username if username else None,
-        password=password if password else None,
-        port=port,
-    )
+    kwargs = {"port": port}
+    if username:
+        kwargs["username"] = username
+        kwargs["password"] = password or ""
+    smbclient.register_session(host, **kwargs)
+
+
+def _smb_unc(host: str, share: str, path: str = "") -> str:
+    """Build a UNC path. path should be relative to the share root."""
+    if not share:
+        raise ValueError("Share name is required for SMB access")
+    base = f"\\\\{host}\\{share}"
+    if path and path not in ("/", "\\", ""):
+        rel = path.strip("/\\").replace("/", "\\")
+        if rel:
+            return base + "\\" + rel
+    return base
 
 
 def smb_list_shares(host: str, username: str, password: str, port: int = 445) -> list:
@@ -186,19 +197,21 @@ def smb_list_shares(host: str, username: str, password: str, port: int = 445) ->
 def smb_list(host: str, username: str, password: str,
              share: str, path: str, port: int = 445) -> list:
     import smbclient
-    import smbclient.path as smb_path
     _smb_conn(host, username, password, port)
-    unc = f"\\\\{host}\\{share}"
-    if path and path != "/":
-        unc += "\\" + path.strip("/\\").replace("/", "\\")
+    unc = _smb_unc(host, share, path)
     entries = []
     for entry in smbclient.scandir(unc):
-        stat = entry.stat()
+        try:
+            stat = entry.stat()
+            size = stat.st_size if not entry.is_dir() else 0
+            mtime = stat.st_mtime
+        except Exception:
+            size, mtime = 0, 0
         entries.append({
             "name": entry.name,
             "type": "dir" if entry.is_dir() else "file",
-            "size": stat.st_size if not entry.is_dir() else 0,
-            "modified": stat.st_mtime,
+            "size": size,
+            "modified": mtime,
         })
     return sorted(entries, key=lambda e: (e["type"] != "dir", e["name"].lower()))
 
@@ -207,7 +220,7 @@ def smb_download(host: str, username: str, password: str,
                  share: str, path: str, port: int = 445) -> bytes:
     import smbclient
     _smb_conn(host, username, password, port)
-    unc = f"\\\\{host}\\{share}\\" + path.strip("/\\").replace("/", "\\")
+    unc = _smb_unc(host, share, path)
     with smbclient.open_file(unc, mode="rb") as f:
         return f.read()
 
@@ -216,7 +229,7 @@ def smb_upload(host: str, username: str, password: str,
                share: str, path: str, data: bytes, port: int = 445) -> None:
     import smbclient
     _smb_conn(host, username, password, port)
-    unc = f"\\\\{host}\\{share}\\" + path.strip("/\\").replace("/", "\\")
+    unc = _smb_unc(host, share, path)
     with smbclient.open_file(unc, mode="wb") as f:
         f.write(data)
 
@@ -225,7 +238,7 @@ def smb_mkdir(host: str, username: str, password: str,
               share: str, path: str, port: int = 445) -> None:
     import smbclient
     _smb_conn(host, username, password, port)
-    unc = f"\\\\{host}\\{share}\\" + path.strip("/\\").replace("/", "\\")
+    unc = _smb_unc(host, share, path)
     smbclient.mkdir(unc)
 
 
@@ -233,7 +246,7 @@ def smb_delete(host: str, username: str, password: str,
                share: str, path: str, is_dir: bool, port: int = 445) -> None:
     import smbclient
     _smb_conn(host, username, password, port)
-    unc = f"\\\\{host}\\{share}\\" + path.strip("/\\").replace("/", "\\")
+    unc = _smb_unc(host, share, path)
     if is_dir:
         smbclient.rmdir(unc)
     else:

@@ -640,9 +640,9 @@ function buildChips(ip, ports) {
       return `<span class="port-chip guac-chip" onclick="openGuac('${ip}', ${p.port}, '${proto}')" title="${tip}">${p.port}<span class="chip-tip">${tip}</span></span>`;
 
     } else if (isCopyparty) {
-      const tUrl = encodeURIComponent(`http://${ip}:${p.port}/`);
+      const proxyUrl = `/proxy?t=${encodeURIComponent(`http://${ip}:${p.port}/`)}`;
       const tip = `Copyparty file server — click to browse`;
-      return `<a class="port-chip copyparty-chip" href="/proxy?t=${tUrl}" target="_blank">${p.port}<span class="chip-tip">${tip}</span></a>`;
+      return `<span class="port-chip copyparty-chip" onclick="tsOpen(${JSON.stringify(proxyUrl)}, ${JSON.stringify(`Copyparty ${ip}:${p.port}`)}, 'web')" style="cursor:pointer">${p.port}<span class="chip-tip">${tip}</span></span>`;
 
     } else if (isFileProt) {
       const label = FILE_PROTO_LABELS[p.port] || escHtml(p.service);
@@ -656,9 +656,9 @@ function buildChips(ip, ports) {
 
     } else if (isBrowsable) {
       const scheme = [443, 8443, 8006].includes(p.port) ? 'https' : 'http';
-      const tUrl = encodeURIComponent(`${scheme}://${ip}:${p.port}/`);
+      const proxyUrl = `/proxy?t=${encodeURIComponent(`${scheme}://${ip}:${p.port}/`)}`;
       const tip = `${escHtml(p.service)} — click to browse`;
-      return `<a class="port-chip" href="/proxy?t=${tUrl}" target="_blank">${p.port}<span class="chip-tip">${tip}</span></a>`;
+      return `<span class="port-chip" onclick="tsOpen(${JSON.stringify(proxyUrl)}, ${JSON.stringify(`${p.service||'Web'} ${ip}:${p.port}`)}, 'web')" style="cursor:pointer">${p.port}<span class="chip-tip">${tip}</span></span>`;
 
     } else {
       return `<span class="port-chip no-browse">${p.port}<span class="chip-tip">${escHtml(p.service)}</span></span>`;
@@ -829,7 +829,6 @@ function showError(msg) {
 // ── Guacamole ─────────────────────────────────────────────────────────────────
 
 async function openGuac(ip, port, proto) {
-  // Show loading cursor
   document.body.style.cursor = 'wait';
   try {
     const r = await fetch(`/api/guac-connect?ip=${encodeURIComponent(ip)}&port=${port}&proto=${proto}`);
@@ -839,7 +838,7 @@ async function openGuac(ip, port, proto) {
       return;
     }
     const d = await r.json();
-    window.open(d.url, '_blank');
+    tsOpen(d.url, `${proto.toUpperCase()} ${ip}:${port}`, proto);
   } catch(e) {
     alert(`Failed to connect to Guacamole: ${e}`);
   } finally {
@@ -898,6 +897,35 @@ fetch('/api/version').then(r=>r.json()).then(d=>{
   }
 })();
 </script>
+
+<!-- ── Taskbar ────────────────────────────────────────────────────────── -->
+<div id="taskbar" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:8000;background:var(--surface);border-top:1px solid var(--border);display:flex;align-items:stretch;height:36px;gap:0;">
+  <div id="taskbar-tabs" style="display:flex;align-items:stretch;flex:1;overflow-x:auto;gap:2px;padding:3px 4px;"></div>
+  <button id="taskbar-close-all" onclick="tsCloseAll()" title="Close all tasks" style="padding:0 10px;background:none;border:none;border-left:1px solid var(--border);color:var(--muted);cursor:pointer;font-size:13px;flex-shrink:0;">&times; all</button>
+</div>
+
+<!-- Task panels container (iframes + elFinder panels live here) -->
+<div id="task-panels" style="position:fixed;bottom:36px;left:0;right:0;top:0;z-index:7999;pointer-events:none;"></div>
+
+<style>
+.ts-tab {
+  display:flex;align-items:center;gap:5px;padding:0 8px 0 10px;
+  border-radius:5px;border:1px solid var(--border);background:var(--surface2);
+  color:var(--muted);font-size:12px;cursor:pointer;white-space:nowrap;
+  max-width:180px;min-width:80px;height:28px;flex-shrink:0;
+}
+.ts-tab.active { border-color:var(--accent);color:var(--text);background:var(--bg); }
+.ts-tab .ts-label { overflow:hidden;text-overflow:ellipsis;flex:1; }
+.ts-tab .ts-x { opacity:.5;font-size:14px;line-height:1;padding:0 2px;flex-shrink:0; }
+.ts-tab .ts-x:hover { opacity:1;color:var(--red); }
+.ts-tab .ts-icon { font-size:11px;flex-shrink:0;opacity:.7; }
+.ts-panel {
+  position:absolute;inset:0;background:var(--bg);
+  pointer-events:auto;display:none;flex-direction:column;
+}
+.ts-panel.visible { display:flex; }
+.ts-panel iframe { flex:1;border:none;width:100%;height:100%; }
+</style>
 
 <!-- ── elFinder: jQuery + elFinder assets ───────────────────────────────── -->
 <link rel="stylesheet" href="/static/elfinder/css/elfinder.min.css">
@@ -959,13 +987,8 @@ let _elfState = {};
 
 function openFileBrowser(ip, port, proto) {
   _elfState = { ip, port, proto, share: '', user: '', password: '' };
-
-  if (proto === 'smb') {
-    // Ask for share + creds before opening
-    _elfShowCredsDialog(ip, port, proto);
-  } else {
-    _elfShowCredsDialog(ip, port, proto);
-  }
+  // Open as a taskbar task (creds dialog shown inside the task panel)
+  tsOpen(null, `${proto.toUpperCase()} ${ip}:${port}`, 'files', { ip, port, proto });
 }
 
 function _elfShowCredsDialog(ip, port, proto) {
@@ -1078,6 +1101,162 @@ if (_origApplyTheme) {
     wrap.classList.remove('elf-dark');
     wrap.classList.add(_elfThemeClass());
   };
+}
+
+// ── Taskbar ───────────────────────────────────────────────────────────────────
+
+const _tsTasks = {}; // id -> { label, type, url, elfState }
+let _tsActive = null;
+let _tsNextId = 1;
+
+const _tsIcons = { web: '🌐', ssh: '🖥', rdp: '🖥', vnc: '🖥', files: '📁' };
+
+function tsOpen(url, label, type, elfState) {
+  // Reuse existing task with same url/label if already open
+  for (const [id, t] of Object.entries(_tsTasks)) {
+    if (t.url === url && t.type === type && url !== null) {
+      tsActivate(id); return;
+    }
+    if (type === 'files' && t.type === 'files' &&
+        elfState && t.elfState &&
+        t.elfState.ip === elfState.ip && t.elfState.port === elfState.port) {
+      tsActivate(id); return;
+    }
+  }
+
+  const id = 'ts' + (_tsNextId++);
+  _tsTasks[id] = { label, type, url, elfState };
+
+  // Create panel
+  const panels = document.getElementById('task-panels');
+  const panel = document.createElement('div');
+  panel.className = 'ts-panel';
+  panel.id = 'panel-' + id;
+  panels.appendChild(panel);
+
+  if (type === 'files') {
+    // elFinder panel — render creds dialog inside
+    panel.style.display = 'flex';
+    panel.innerHTML = `<div id="elf-inner-${id}" style="flex:1;display:flex;flex-direction:column;"></div>`;
+    // Defer to after DOM update
+    setTimeout(() => {
+      _elfState = { ...elfState };
+      const container = document.getElementById('elf-inner-' + id);
+      _elfShowCredsInContainer(container, id);
+    }, 0);
+  } else {
+    // iframe for web / guacamole
+    panel.innerHTML = `<iframe src="${escAttr(url)}" allow="fullscreen" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"></iframe>`;
+  }
+
+  // Create tab
+  const tabs = document.getElementById('taskbar-tabs');
+  const tab = document.createElement('div');
+  tab.className = 'ts-tab';
+  tab.id = 'tab-' + id;
+  tab.innerHTML = `<span class="ts-icon">${_tsIcons[type] || '▪'}</span><span class="ts-label">${escHtml(label)}</span><span class="ts-x" onclick="event.stopPropagation();tsClose('${id}')">&times;</span>`;
+  tab.addEventListener('click', () => tsActivate(id));
+  tabs.appendChild(tab);
+
+  document.getElementById('taskbar').style.display = 'flex';
+  tsActivate(id);
+}
+
+function tsActivate(id) {
+  // Hide all panels, deactivate all tabs
+  document.querySelectorAll('.ts-panel').forEach(p => p.classList.remove('visible'));
+  document.querySelectorAll('.ts-tab').forEach(t => t.classList.remove('active'));
+  _tsActive = id;
+  const panel = document.getElementById('panel-' + id);
+  const tab = document.getElementById('tab-' + id);
+  if (panel) panel.classList.add('visible');
+  if (tab) tab.classList.add('active');
+  // Shrink main content area
+  document.body.style.paddingBottom = '36px';
+}
+
+function tsClose(id) {
+  const panel = document.getElementById('panel-' + id);
+  const tab = document.getElementById('tab-' + id);
+  if (panel) panel.remove();
+  if (tab) tab.remove();
+  delete _tsTasks[id];
+  if (_tsActive === id) {
+    _tsActive = null;
+    document.body.style.paddingBottom = '';
+    // Activate last remaining task if any
+    const ids = Object.keys(_tsTasks);
+    if (ids.length) tsActivate(ids[ids.length - 1]);
+  }
+  if (!Object.keys(_tsTasks).length) {
+    document.getElementById('taskbar').style.display = 'none';
+    document.body.style.paddingBottom = '';
+  }
+}
+
+function tsCloseAll() {
+  Object.keys(_tsTasks).forEach(id => {
+    document.getElementById('panel-' + id)?.remove();
+    document.getElementById('tab-' + id)?.remove();
+  });
+  Object.keys(_tsTasks).forEach(k => delete _tsTasks[k]);
+  _tsActive = null;
+  document.getElementById('taskbar').style.display = 'none';
+  document.body.style.paddingBottom = '';
+}
+
+function escAttr(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;');
+}
+
+// elFinder inside a task panel (no separate modal)
+function _elfShowCredsInContainer(container, taskId) {
+  const { ip, port, proto } = _elfState;
+  container.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;background:var(--bg);gap:12px;padding:32px;">
+      <div style="font-size:15px;color:var(--text);font-weight:600;">${proto.toUpperCase()} File Browser</div>
+      <div style="font-size:12px;color:var(--muted);">${ip}:${port}</div>
+      <div style="display:flex;flex-direction:column;gap:8px;width:min(320px,90%);">
+        <input id="elf-user-${taskId}" placeholder="Username (blank for guest)" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;outline:none;">
+        <input id="elf-pass-${taskId}" type="password" placeholder="Password" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;outline:none;">
+        ${proto === 'smb' ? `<input id="elf-share-${taskId}" placeholder="Share name (e.g. Data, homes)" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;outline:none;">` : ''}
+        <button onclick="_elfLaunchInContainer('${taskId}')" style="padding:8px;border-radius:6px;border:none;background:rgba(249,115,22,0.35);color:#fdba74;font-size:13px;font-weight:600;cursor:pointer;margin-top:4px;">Browse Files</button>
+      </div>
+    </div>`;
+  setTimeout(() => document.getElementById(`elf-user-${taskId}`)?.focus(), 50);
+  container.querySelectorAll('input').forEach(i => {
+    i.addEventListener('keydown', e => { if (e.key === 'Enter') _elfLaunchInContainer(taskId); });
+  });
+}
+
+function _elfLaunchInContainer(taskId) {
+  const task = _tsTasks['ts' + taskId.replace('ts','')];
+  if (!task) return;
+  const { ip, port, proto } = task.elfState;
+  const user = document.getElementById(`elf-user-${taskId}`)?.value || '';
+  const pass = document.getElementById(`elf-pass-${taskId}`)?.value || '';
+  const share = document.getElementById(`elf-share-${taskId}`)?.value || '';
+
+  const panel = document.getElementById('panel-' + taskId);
+  panel.innerHTML = `<div id="elf-inner-${taskId}" style="flex:1;min-height:0;"></div>`;
+  const el = $(`<div>`).appendTo(`#elf-inner-${taskId}`);
+  const wrap = document.getElementById('panel-' + taskId);
+  wrap.classList.add('elf-dark');
+
+  const connUrl = `/api/elfinder?proto=${encodeURIComponent(proto)}&host=${encodeURIComponent(ip)}&port=${port}&share=${encodeURIComponent(share)}&user=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`;
+
+  el.elfinder({
+    url: connUrl,
+    height: '100%',
+    resizable: false,
+    useBrowserHistory: false,
+    rememberLastDir: false,
+    soundPath: '/static/elfinder/sounds/',
+    lang: 'en',
+    uiOptions: {
+      toolbar: [['back','forward','up'],['mkdir','upload'],['copy','cut','paste'],['rm'],['info'],['view','sort']],
+    },
+  });
 }
 </script>
 
