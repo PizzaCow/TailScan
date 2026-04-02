@@ -282,11 +282,15 @@ async def proxy(request: Request):
 
     from urllib.parse import urlparse, urlencode, parse_qs, quote, unquote
 
-    # Extract target from query string — everything after ?t= (including & params in target)
-    raw_query = str(request.url.query)
-    if not raw_query.startswith("t="):
+    # Extract target from ?t= parameter
+    t_param = request.query_params.get("t")
+    if not t_param:
         raise HTTPException(400, "Missing ?t= parameter")
-    target_url = unquote(raw_query[2:])
+    target_url = t_param
+    # Re-append any extra query params that belong to the target URL
+    extra = {k: v for k, v in request.query_params.items() if k != "t"}
+    if extra:
+        target_url += ("&" if "?" in target_url else "?") + "&".join(f"{k}={quote(v)}" for k, v in extra.items())
 
     parsed = urlparse(target_url)
     if parsed.scheme not in ("http", "https"):
