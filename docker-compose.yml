@@ -9,7 +9,7 @@ services:
     ports:
       - "6226:6226"
     volumes:
-      - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
+      - /run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
       - tailscan-cache:/tmp/tailscan-cache
     env_file: .env
     environment:
