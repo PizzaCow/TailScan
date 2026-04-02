@@ -17,6 +17,7 @@ logging.basicConfig(
 from fastapi import FastAPI, Request, Response, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 import auth
 import tailscale
 import scanner
@@ -41,6 +42,7 @@ async def lifespan(app):
     yield
 
 app = FastAPI(title="TailScan", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
@@ -835,6 +837,282 @@ async def api_browse_session_delete(request: Request, url: str):
     except Exception:
         pass
     return {"status": "stopped"}
+
+
+# ─── elFinder connector ──────────────────────────────────────────────────────
+
+import base64 as _b64
+import mimetypes as _mimetypes
+
+def _elf_id(proto: str, host: str, port: int, share: str, path: str) -> str:
+    """Encode a volume+path into an elFinder hash."""
+    vol = f"{proto}:{host}:{port}:{share}"
+    raw = f"{vol}:{path}"
+    return _b64.urlsafe_b64encode(raw.encode()).decode().rstrip("=") + "_"
+
+def _elf_decode(hash_: str) -> tuple:
+    """Decode an elFinder hash back to (proto, host, port, share, path)."""
+    padded = hash_.rstrip("_") + "=="
+    raw = _b64.urlsafe_b64decode(padded).decode()
+    proto, host, port, share, path = raw.split(":", 4)
+    return proto, host, int(port), share, path
+
+def _elf_entry(proto, host, port, share, path, name, is_dir, size=0, mime=None):
+    hash_ = _elf_id(proto, host, port, share, path)
+    parent_path = "/".join(path.rstrip("/").split("/")[:-1]) or "/"
+    phash = _elf_id(proto, host, port, share, parent_path) if path != "/" else None
+    if mime is None:
+        mime = "directory" if is_dir else (_mimetypes.guess_type(name)[0] or "application/octet-stream")
+    entry = {
+        "hash": hash_,
+        "name": name,
+        "mime": mime,
+        "size": 0 if is_dir else size,
+        "dirs": 1 if is_dir else 0,
+        "read": 1, "write": 1, "locked": 0, "hidden": 0,
+        "ts": 0,
+        "volumeid": f"{proto}_{host}_{port}_{share}_",
+    }
+    if phash:
+        entry["phash"] = phash
+    return entry
+
+def _elf_root_entry(proto, host, port, share):
+    hash_ = _elf_id(proto, host, port, share, "/")
+    label = f"{proto.upper()}:{host}" + (f"/{share}" if share else "")
+    return {
+        "hash": hash_,
+        "name": label,
+        "mime": "directory",
+        "size": 0, "dirs": 1, "read": 1, "write": 1, "locked": 0, "hidden": 0, "ts": 0,
+        "volumeid": f"{proto}_{host}_{port}_{share}_",
+        "isroot": 1,
+        "options": {
+            "path": "/", "separator": "/", "disabled": [],
+            "archivers": {"create": [], "extract": []},
+            "copyOverwrite": 1, "uploadMaxSize": 0,
+        },
+    }
+
+async def _elf_ls(proto, host, port, share, path, user, password):
+    if proto == "ftp":
+        return fb.ftp_list(host, port, user, password, path)
+    else:
+        return fb.smb_list(host, user, password, share, path, port)
+
+async def _elf_open(proto, host, port, share, path, user, password):
+    """Return (entries, cwd_entry) for a directory."""
+    cwd_entry = _elf_entry(proto, host, port, share, path, path.rstrip("/").split("/")[-1] or "root", True)
+    if path == "/":
+        cwd_entry = _elf_root_entry(proto, host, port, share)
+    entries = await _asyncio.get_event_loop().run_in_executor(
+        None, lambda: _elf_ls_sync(proto, host, port, share, path, user, password)
+    )
+    files = []
+    for e in entries:
+        child_path = (path.rstrip("/") + "/" + e["name"])
+        files.append(_elf_entry(proto, host, port, share, child_path,
+                                e["name"], e["type"] == "dir", e.get("size", 0)))
+    return cwd_entry, files
+
+def _elf_ls_sync(proto, host, port, share, path, user, password):
+    if proto == "ftp":
+        return fb.ftp_list(host, port, user, password, path)
+    else:
+        return fb.smb_list(host, user, password, share, path, port)
+
+
+@app.get("/api/elfinder")
+@app.post("/api/elfinder")
+async def elfinder_connector(request: Request):
+    if not get_session(request):
+        raise HTTPException(401)
+
+    # Parse params from GET or POST
+    if request.method == "POST":
+        form = await request.form()
+        params = dict(form)
+    else:
+        params = dict(request.query_params)
+
+    cmd = params.get("cmd", "")
+    # Volume credentials passed as query params: proto, host, port, share, user, password
+    proto  = params.get("proto", "ftp")
+    host   = params.get("host", "")
+    port   = int(params.get("port", 21 if proto == "ftp" else 445))
+    share  = params.get("share", "")
+    user   = params.get("user", "")
+    password = params.get("password", "")
+
+    def err(msg):
+        return JSONResponse({"error": msg})
+
+    # ── open ──────────────────────────────────────────────────────────────────
+    if cmd == "open":
+        init = params.get("init") == "1"
+        target = params.get("target", "")
+        if init or not target:
+            path = "/"
+        else:
+            try:
+                _, _, _, _, path = _elf_decode(target)
+            except Exception:
+                path = "/"
+        try:
+            cwd, files = await _elf_open(proto, host, port, share, path, user, password)
+        except Exception as e:
+            return err(str(e))
+
+        resp = {"cwd": cwd, "files": [cwd] + files, "api": "2.1", "uplMaxSize": "256M", "uplMaxFile": 20}
+        if init:
+            resp["init"] = 1
+            resp["options"] = cwd.get("options", {})
+        return JSONResponse(resp)
+
+    # ── ls ────────────────────────────────────────────────────────────────────
+    elif cmd == "ls":
+        target = params.get("target", "")
+        try:
+            _, _, _, _, path = _elf_decode(target)
+            entries = await _asyncio.get_event_loop().run_in_executor(
+                None, lambda: _elf_ls_sync(proto, host, port, share, path, user, password)
+            )
+            return JSONResponse({"list": [e["name"] for e in entries]})
+        except Exception as e:
+            return err(str(e))
+
+    # ── tree ──────────────────────────────────────────────────────────────────
+    elif cmd == "tree":
+        target = params.get("target", "")
+        try:
+            _, _, _, _, path = _elf_decode(target)
+            entries = await _asyncio.get_event_loop().run_in_executor(
+                None, lambda: _elf_ls_sync(proto, host, port, share, path, user, password)
+            )
+            dirs = [_elf_entry(proto, host, port, share,
+                               path.rstrip("/") + "/" + e["name"],
+                               e["name"], True)
+                    for e in entries if e["type"] == "dir"]
+            return JSONResponse({"tree": dirs})
+        except Exception as e:
+            return err(str(e))
+
+    # ── get (file content for preview) ───────────────────────────────────────
+    elif cmd == "get":
+        target = params.get("target", "")
+        try:
+            _, h, p, sh, path = _elf_decode(target)
+            if proto == "ftp":
+                data = await _asyncio.get_event_loop().run_in_executor(
+                    None, lambda: fb.ftp_download(h, p, user, password, path))
+            else:
+                data = await _asyncio.get_event_loop().run_in_executor(
+                    None, lambda: fb.smb_download(h, user, password, sh, path, p))
+            return JSONResponse({"content": data.decode(errors="replace")})
+        except Exception as e:
+            return err(str(e))
+
+    # ── file (download) ───────────────────────────────────────────────────────
+    elif cmd == "file":
+        target = params.get("target", "")
+        try:
+            _, h, p, sh, path = _elf_decode(target)
+            if proto == "ftp":
+                data = await _asyncio.get_event_loop().run_in_executor(
+                    None, lambda: fb.ftp_download(h, p, user, password, path))
+            else:
+                data = await _asyncio.get_event_loop().run_in_executor(
+                    None, lambda: fb.smb_download(h, user, password, sh, path, p))
+            name = path.split("/")[-1] or "file"
+            mime = _mimetypes.guess_type(name)[0] or "application/octet-stream"
+            return Response(data, media_type=mime,
+                            headers={"Content-Disposition": f'attachment; filename="{name}"'})
+        except Exception as e:
+            return err(str(e))
+
+    # ── upload ────────────────────────────────────────────────────────────────
+    elif cmd == "upload":
+        target = params.get("target", "")
+        try:
+            _, h, p, sh, dir_path = _elf_decode(target)
+        except Exception:
+            return err("Invalid target")
+        uploaded = []
+        form = await request.form()
+        for key, f in form.multi_items():
+            if key.startswith("upload") and hasattr(f, "filename"):
+                data = await f.read()
+                dest = dir_path.rstrip("/") + "/" + f.filename
+                if proto == "ftp":
+                    await _asyncio.get_event_loop().run_in_executor(
+                        None, lambda: fb.ftp_upload(h, p, user, password, dest, data))
+                else:
+                    await _asyncio.get_event_loop().run_in_executor(
+                        None, lambda: fb.smb_upload(h, user, password, sh, dest, data, p))
+                uploaded.append(_elf_entry(proto, h, p, sh, dest, f.filename, False, len(data)))
+        return JSONResponse({"added": uploaded})
+
+    # ── mkdir ─────────────────────────────────────────────────────────────────
+    elif cmd == "mkdir":
+        target = params.get("target", "")
+        name = params.get("name", "")
+        try:
+            _, h, p, sh, dir_path = _elf_decode(target)
+            new_path = dir_path.rstrip("/") + "/" + name
+            if proto == "ftp":
+                await _asyncio.get_event_loop().run_in_executor(
+                    None, lambda: fb.ftp_mkdir(h, p, user, password, new_path))
+            else:
+                await _asyncio.get_event_loop().run_in_executor(
+                    None, lambda: fb.smb_mkdir(h, user, password, sh, new_path, p))
+            entry = _elf_entry(proto, h, p, sh, new_path, name, True)
+            return JSONResponse({"added": [entry]})
+        except Exception as e:
+            return err(str(e))
+
+    # ── rm ────────────────────────────────────────────────────────────────────
+    elif cmd == "rm":
+        targets = params.getlist("targets[]") if hasattr(params, "getlist") else [v for k, v in params.items() if k == "targets[]"]
+        # Also handle form multi-values
+        if request.method == "POST":
+            form = await request.form()
+            targets = [v for k, v in form.multi_items() if k == "targets[]"]
+        removed = []
+        for t in targets:
+            try:
+                _, h, p, sh, path = _elf_decode(t)
+                # Guess if dir by trying dir delete first
+                try:
+                    if proto == "ftp":
+                        await _asyncio.get_event_loop().run_in_executor(
+                            None, lambda: fb.ftp_delete(h, p, user, password, path, True))
+                    else:
+                        await _asyncio.get_event_loop().run_in_executor(
+                            None, lambda: fb.smb_delete(h, user, password, sh, path, True, p))
+                except Exception:
+                    if proto == "ftp":
+                        await _asyncio.get_event_loop().run_in_executor(
+                            None, lambda: fb.ftp_delete(h, p, user, password, path, False))
+                    else:
+                        await _asyncio.get_event_loop().run_in_executor(
+                            None, lambda: fb.smb_delete(h, user, password, sh, path, False, p))
+                removed.append(t)
+            except Exception:
+                pass
+        return JSONResponse({"removed": removed})
+
+    # ── rename ────────────────────────────────────────────────────────────────
+    elif cmd == "rename":
+        # FTP/SMB rename not implemented yet — return error gracefully
+        return err("Rename not supported yet")
+
+    # ── info / size ───────────────────────────────────────────────────────────
+    elif cmd in ("info", "size", "dim"):
+        return JSONResponse({"dim": "", "size": 0})
+
+    # ── unknown ───────────────────────────────────────────────────────────────
+    else:
+        return JSONResponse({"error": f"Unknown command: {cmd}"})
 
 
 # ─── File browser API ────────────────────────────────────────────────────────

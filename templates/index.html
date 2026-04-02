@@ -898,276 +898,186 @@ fetch('/api/version').then(r=>r.json()).then(d=>{
   }
 })();
 </script>
-<!-- ── File Browser Modal ──────────────────────────────────────────────── -->
-<div id="fb-modal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.7);align-items:center;justify-content:center;">
-  <div style="background:var(--bg,#1a1a2e);border:1px solid rgba(255,255,255,0.12);border-radius:10px;width:min(780px,96vw);max-height:90vh;display:flex;flex-direction:column;overflow:hidden;">
 
-    <!-- header -->
-    <div style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.08);">
-      <span id="fb-proto-badge" style="font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;background:rgba(249,115,22,0.25);color:#fdba74;letter-spacing:.05em;">FTP</span>
-      <span id="fb-host-label" style="font-size:13px;color:#a0a8c0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
-      <button onclick="fbClose()" style="background:none;border:none;color:#a0a8c0;cursor:pointer;font-size:18px;line-height:1;padding:0 4px;">&times;</button>
+<!-- ── elFinder: jQuery + elFinder assets ───────────────────────────────── -->
+<link rel="stylesheet" href="/static/elfinder/css/elfinder.min.css">
+<link rel="stylesheet" href="/static/elfinder/css/theme.css">
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+<script src="/static/elfinder/js/elfinder.min.js"></script>
+
+<!-- ── elFinder modal wrapper ───────────────────────────────────────────── -->
+<div id="elfinder-modal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;">
+  <div id="elfinder-wrap" style="width:min(960px,96vw);height:min(680px,90vh);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;border:1px solid rgba(255,255,255,0.1);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:var(--surface);border-bottom:1px solid var(--border);">
+      <span id="elf-title" style="font-size:13px;color:var(--muted);font-family:monospace;"></span>
+      <button id="elf-close-btn" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:20px;line-height:1;padding:0 4px;">&times;</button>
     </div>
-
-    <!-- auth bar -->
-    <div id="fb-auth-bar" style="display:flex;gap:6px;padding:8px 16px;border-bottom:1px solid rgba(255,255,255,0.06);flex-wrap:wrap;align-items:center;">
-      <input id="fb-user" placeholder="Username" style="flex:1;min-width:100px;padding:4px 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:inherit;font-size:12px;">
-      <input id="fb-pass" type="password" placeholder="Password" style="flex:1;min-width:100px;padding:4px 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:inherit;font-size:12px;">
-      <span id="fb-share-wrap" style="display:none;flex:1;min-width:100px;">
-        <input id="fb-share" placeholder="Share" style="width:100%;padding:4px 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:inherit;font-size:12px;">
-      </span>
-      <button onclick="fbConnect()" style="padding:4px 12px;border-radius:5px;border:none;background:rgba(249,115,22,0.35);color:#fdba74;cursor:pointer;font-size:12px;font-weight:600;">Connect</button>
-    </div>
-
-    <!-- breadcrumb -->
-    <div id="fb-breadcrumb" style="padding:6px 16px;font-size:12px;color:#6b7280;min-height:28px;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;gap:4px;flex-wrap:wrap;"></div>
-
-    <!-- toolbar -->
-    <div style="display:flex;gap:6px;padding:6px 16px;border-bottom:1px solid rgba(255,255,255,0.05);align-items:center;">
-      <button onclick="fbMkdir()" title="New folder" style="padding:3px 10px;border-radius:5px;border:1px solid rgba(255,255,255,0.12);background:transparent;color:#a0a8c0;cursor:pointer;font-size:12px;">+ Folder</button>
-      <label style="padding:3px 10px;border-radius:5px;border:1px solid rgba(255,255,255,0.12);color:#a0a8c0;cursor:pointer;font-size:12px;">
-        Upload <input type="file" id="fb-upload-input" multiple style="display:none" onchange="fbUpload(this.files)">
-      </label>
-      <span id="fb-status" style="font-size:11px;color:#6b7280;margin-left:4px;"></span>
-    </div>
-
-    <!-- file list -->
-    <div id="fb-list" style="flex:1;overflow-y:auto;padding:4px 0;min-height:120px;">
-      <div style="padding:24px;text-align:center;color:#6b7280;font-size:13px;">Enter credentials and click Connect</div>
-    </div>
-
+    <div id="elfinder-container" style="flex:1;min-height:0;"></div>
   </div>
 </div>
 
+<!-- ── elFinder theme overrides ─────────────────────────────────────────── -->
 <style>
-.fb-row { display:flex;align-items:center;gap:8px;padding:5px 16px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:13px;cursor:pointer; }
-.fb-row:hover { background:rgba(255,255,255,0.05); }
-.fb-row .fb-icon { width:18px;text-align:center;flex-shrink:0; }
-.fb-row .fb-name { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
-.fb-row .fb-size { color:#6b7280;font-size:11px;flex-shrink:0; }
-.fb-row .fb-del { opacity:0;padding:1px 7px;border-radius:4px;border:1px solid rgba(239,68,68,0.4);background:transparent;color:#f87171;cursor:pointer;font-size:11px;flex-shrink:0; }
-.fb-row:hover .fb-del { opacity:1; }
+/* Shared overrides applied via JS class on wrap element */
+.elf-dark .elfinder,
+.elf-dark .elfinder .elfinder-navbar,
+.elf-dark .elfinder .elfinder-cwd-wrapper,
+.elf-dark .elfinder .elfinder-statusbar { background: var(--bg) !important; color: var(--text) !important; }
+
+.elf-dark .elfinder .elfinder-toolbar { background: var(--surface) !important; border-bottom: 1px solid var(--border) !important; }
+.elf-dark .elfinder .elfinder-navbar { border-right: 1px solid var(--border) !important; }
+.elf-dark .elfinder .elfinder-cwd { background: var(--bg) !important; }
+.elf-dark .elfinder .elfinder-cwd-file .elfinder-cwd-filename { color: var(--text) !important; }
+.elf-dark .elfinder .elfinder-cwd-file.ui-selected .elfinder-cwd-filename { color: #fff !important; }
+.elf-dark .elfinder .elfinder-cwd-file.ui-selected { background: var(--accent) !important; opacity: 0.9; }
+.elf-dark .elfinder .elfinder-navbar-dir { color: var(--text) !important; }
+.elf-dark .elfinder .elfinder-navbar-dir.ui-state-active { background: var(--surface2) !important; color: var(--accent) !important; }
+.elf-dark .elfinder .elfinder-statusbar { border-top: 1px solid var(--border) !important; color: var(--muted) !important; }
+.elf-dark .elfinder .elfinder-path { color: var(--muted) !important; }
+.elf-dark .elfinder button.ui-state-default { background: var(--surface) !important; border-color: var(--border) !important; color: var(--text) !important; }
+.elf-dark .elfinder button.ui-state-hover { background: var(--surface2) !important; border-color: var(--accent) !important; }
+.elf-dark .elfinder .ui-dialog { background: var(--surface) !important; border: 1px solid var(--border) !important; color: var(--text) !important; }
+.elf-dark .elfinder .ui-dialog .ui-dialog-titlebar { background: var(--surface2) !important; color: var(--text) !important; border-bottom: 1px solid var(--border) !important; }
+.elf-dark .elfinder .ui-dialog input,
+.elf-dark .elfinder .ui-dialog textarea { background: var(--bg) !important; color: var(--text) !important; border: 1px solid var(--border) !important; }
+.elf-dark .elfinder .elfinder-contextmenu { background: var(--surface) !important; border: 1px solid var(--border) !important; }
+.elf-dark .elfinder .elfinder-contextmenu-item:hover { background: var(--surface2) !important; }
+.elf-dark .elfinder .elfinder-contextmenu-separator { border-top: 1px solid var(--border) !important; }
+.elf-dark .elfinder .elfinder-info-title { background: var(--surface2) !important; }
+/* Scrollbars */
+.elf-dark .elfinder ::-webkit-scrollbar { width: 6px; height: 6px; }
+.elf-dark .elfinder ::-webkit-scrollbar-track { background: var(--bg); }
+.elf-dark .elfinder ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 </style>
 
 <script>
-// ── File Browser ──────────────────────────────────────────────────────────────
+// ── elFinder integration ──────────────────────────────────────────────────────
 
-let fbState = { proto: null, host: null, port: null, share: null, path: '/' };
-
-function fbFmtSize(n) {
-  if (!n) return '';
-  if (n < 1024) return n + ' B';
-  if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
-  if (n < 1073741824) return (n/1048576).toFixed(1) + ' MB';
-  return (n/1073741824).toFixed(2) + ' GB';
-}
+let _elfInstance = null;
+let _elfState = {};
 
 function openFileBrowser(ip, port, proto) {
-  fbState = { proto, host: ip, port, share: null, path: '/' };
-  document.getElementById('fb-modal').style.display = 'flex';
-  document.getElementById('fb-proto-badge').textContent = proto.toUpperCase();
-  document.getElementById('fb-host-label').textContent = `${ip}:${port}`;
-  document.getElementById('fb-user').value = '';
-  document.getElementById('fb-pass').value = '';
-  document.getElementById('fb-share').value = '';
-  document.getElementById('fb-share-wrap').style.display = proto === 'smb' ? '' : 'none';
-  document.getElementById('fb-list').innerHTML = '<div style="padding:24px;text-align:center;color:#6b7280;font-size:13px;">Enter credentials and click Connect</div>';
-  fbBreadcrumb();
-  if (proto === 'smb') fbLoadShares();
-}
+  _elfState = { ip, port, proto, share: '', user: '', password: '' };
 
-function fbClose() {
-  document.getElementById('fb-modal').style.display = 'none';
-}
-document.getElementById('fb-modal').addEventListener('click', e => { if (e.target === document.getElementById('fb-modal')) fbClose(); });
-
-function fbStatus(msg, err) {
-  const el = document.getElementById('fb-status');
-  el.textContent = msg;
-  el.style.color = err ? '#f87171' : '#6b7280';
-}
-
-function fbBreadcrumb() {
-  const el = document.getElementById('fb-breadcrumb');
-  const parts = fbState.path.replace(/\\/g,'/').split('/').filter(Boolean);
-  let html = `<span style="cursor:pointer;color:#9ca3af" onclick="fbNav('/')">~</span>`;
-  let acc = '';
-  for (const p of parts) {
-    acc += '/' + p;
-    const snap = acc;
-    html += `<span style="color:#6b7280"> / </span><span style="cursor:pointer;color:#9ca3af" onclick="fbNav('${snap}')">${escHtml(p)}</span>`;
-  }
-  if (fbState.share) html = `<span style="color:#fdba74;margin-right:4px;">${escHtml(fbState.share)}</span>` + html;
-  el.innerHTML = html;
-}
-
-async function fbConnect() {
-  fbState.user = document.getElementById('fb-user').value;
-  fbState.pass = document.getElementById('fb-pass').value;
-  const shareVal = document.getElementById('fb-share').value.trim();
-  if (fbState.proto === 'smb') {
-    if (shareVal) {
-      // Share already entered — go straight to browsing it
-      fbSelectShare(shareVal);
-    } else {
-      await fbLoadShares();
-    }
+  if (proto === 'smb') {
+    // Ask for share + creds before opening
+    _elfShowCredsDialog(ip, port, proto);
   } else {
-    await fbNav('/');
+    _elfShowCredsDialog(ip, port, proto);
   }
 }
 
-async function fbLoadShares() {
-  fbStatus('Loading shares...');
-  const { host, port } = fbState;
-  const user = fbState.user || '';
-  const pass = fbState.pass || '';
-  try {
-    const r = await fetch(`/api/smb/shares?host=${encodeURIComponent(host)}&port=${port}&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`);
-    if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); fbStatus(e.detail||r.statusText, true); fbShowManualShare(); return; }
-    const shares = await r.json();
-    fbStatus('');
-    const list = document.getElementById('fb-list');
-    if (!shares.length) { fbShowManualShare(); return; }
-    list.innerHTML = shares.map(s => `
-      <div class="fb-row" onclick="fbSelectShare('${escHtml(s.name)}')">
-        <span class="fb-icon">&#128191;</span>
-        <span class="fb-name">${escHtml(s.name)}</span>
-      </div>`).join('');
-  } catch(e) { fbStatus(String(e), true); fbShowManualShare(); }
-}
+function _elfShowCredsDialog(ip, port, proto) {
+  // Simple inline credential prompt
+  const modal = document.getElementById('elfinder-modal');
+  const container = document.getElementById('elfinder-container');
+  const title = document.getElementById('elf-title');
+  title.textContent = `${proto.toUpperCase()} — ${ip}:${port}`;
 
-function fbShowManualShare() {
-  const shareInput = document.getElementById('fb-share');
-  document.getElementById('fb-share-wrap').style.display = '';
-  shareInput.focus();
-  const list = document.getElementById('fb-list');
-  list.innerHTML = `<div style="padding:20px 16px;color:#9ca3af;font-size:13px;">
-    Share enumeration not available. Enter the share name above and press
-    <strong style="color:#fdba74">Connect</strong> to browse it.
-  </div>`;
-}
-
-function fbSelectShare(share) {
-  fbState.share = share;
-  fbState.path = '/';
-  document.getElementById('fb-share').value = share;
-  fbBreadcrumb();
-  fbNav('/');
-}
-
-async function fbNav(path) {
-  fbState.path = path;
-  fbBreadcrumb();
-  fbStatus('Loading...');
-  const { proto, host, port, share, user='', pass='' } = fbState;
-  const base = proto === 'ftp'
-    ? `/api/ftp/list?host=${encodeURIComponent(host)}&port=${port}&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&path=${encodeURIComponent(path)}`
-    : `/api/smb/list?host=${encodeURIComponent(host)}&port=${port}&share=${encodeURIComponent(share||'')}&path=${encodeURIComponent(path)}&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`;
-  try {
-    const r = await fetch(base);
-    if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); fbStatus(e.detail||r.statusText, true); return; }
-    const entries = await r.json();
-    fbStatus('');
-    renderEntries(entries);
-  } catch(e) { fbStatus(String(e), true); }
-}
-
-function renderEntries(entries) {
-  const list = document.getElementById('fb-list');
-  if (!entries.length) { list.innerHTML = '<div style="padding:24px;text-align:center;color:#6b7280">Empty directory</div>'; return; }
-  const { path } = fbState;
-  let html = '';
-  // Up directory
-  const parent = path.replace(/\\/g,'/').replace(/\/[^/]+\/?$/, '') || '/';
-  if (path !== '/') html += `<div class="fb-row" onclick="fbNav('${parent}')"><span class="fb-icon">&#8593;</span><span class="fb-name" style="color:#9ca3af">..</span><span class="fb-size"></span></div>`;
-  for (const e of entries) {
-    const fullPath = (path.replace(/\/$/, '') + '/' + e.name);
-    const isDir = e.type === 'dir';
-    const icon = isDir ? '&#128193;' : '&#128196;';
-    const action = isDir ? `fbNav('${fullPath.replace(/'/g,"\\'")}')` : `fbDownload('${fullPath.replace(/'/g,"\\'")}', '${e.name.replace(/'/g,"\\'")}')`;
-    const delAction = `fbDelete('${fullPath.replace(/'/g,"\\'")}', ${isDir}, '${e.name.replace(/'/g,"\\'")}')`;
-    html += `<div class="fb-row">
-      <span class="fb-icon" onclick="${action}">${icon}</span>
-      <span class="fb-name" onclick="${action}">${escHtml(e.name)}</span>
-      <span class="fb-size">${isDir ? '' : fbFmtSize(e.size)}</span>
-      <button class="fb-del" onclick="event.stopPropagation();${delAction}">del</button>
+  container.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;background:var(--bg);gap:12px;padding:32px;">
+      <div style="font-size:15px;color:var(--text);font-weight:600;">${proto.toUpperCase()} File Browser</div>
+      <div style="font-size:12px;color:var(--muted);">${ip}:${port}</div>
+      <div style="display:flex;flex-direction:column;gap:8px;width:min(320px,90%);">
+        <input id="elf-user-input" placeholder="Username (blank for guest)" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;outline:none;">
+        <input id="elf-pass-input" type="password" placeholder="Password" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;outline:none;">
+        ${proto === 'smb' ? `<input id="elf-share-input" placeholder="Share name (e.g. Data, homes)" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;outline:none;">` : ''}
+        <button onclick="_elfLaunch()" style="padding:8px;border-radius:6px;border:none;background:rgba(249,115,22,0.35);color:#fdba74;font-size:13px;font-weight:600;cursor:pointer;margin-top:4px;">Browse Files</button>
+      </div>
     </div>`;
-  }
-  list.innerHTML = html;
+
+  modal.style.display = 'flex';
+  setTimeout(() => document.getElementById('elf-user-input')?.focus(), 50);
+
+  // Enter key submits
+  container.querySelectorAll('input').forEach(i => {
+    i.addEventListener('keydown', e => { if (e.key === 'Enter') _elfLaunch(); });
+  });
 }
 
-async function fbDownload(path, filename) {
-  const { proto, host, port, share, user='', pass='' } = fbState;
-  fbStatus(`Downloading ${filename}...`);
-  let url;
-  if (proto === 'ftp') {
-    url = `/api/ftp/download?host=${encodeURIComponent(host)}&port=${port}&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&path=${encodeURIComponent(path)}`;
-  } else {
-    url = `/api/smb/download?host=${encodeURIComponent(host)}&port=${port}&share=${encodeURIComponent(share||'')}&path=${encodeURIComponent(path)}&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`;
-  }
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => fbStatus(''), 2000);
+function _elfLaunch() {
+  const user = document.getElementById('elf-user-input')?.value || '';
+  const pass = document.getElementById('elf-pass-input')?.value || '';
+  const share = document.getElementById('elf-share-input')?.value || '';
+  _elfState.user = user;
+  _elfState.password = pass;
+  _elfState.share = share;
+  _elfInit();
 }
 
-async function fbUpload(files) {
-  const { proto, host, port, share, path, user='', pass='' } = fbState;
-  for (const file of files) {
-    const destPath = (path.replace(/\/$/, '') + '/' + file.name);
-    fbStatus(`Uploading ${file.name}...`);
-    let url;
-    if (proto === 'ftp') {
-      url = `/api/ftp/upload?host=${encodeURIComponent(host)}&port=${port}&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&path=${encodeURIComponent(destPath)}`;
-    } else {
-      url = `/api/smb/upload?host=${encodeURIComponent(host)}&port=${port}&share=${encodeURIComponent(share||'')}&path=${encodeURIComponent(destPath)}&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`;
-    }
-    try {
-      const r = await fetch(url, { method: 'POST', body: file });
-      if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); fbStatus(e.detail||r.statusText, true); continue; }
-    } catch(e) { fbStatus(String(e), true); continue; }
-  }
-  fbStatus('Upload complete');
-  await fbNav(path);
-  document.getElementById('fb-upload-input').value = '';
+function _elfThemeClass() {
+  // Always dark (both themes are dark)
+  return 'elf-dark';
 }
 
-async function fbMkdir() {
-  const name = prompt('Folder name:');
-  if (!name) return;
-  const { proto, host, port, share, path, user='', pass='' } = fbState;
-  const newPath = (path.replace(/\/$/, '') + '/' + name);
-  let url;
-  if (proto === 'ftp') {
-    url = `/api/ftp/mkdir?host=${encodeURIComponent(host)}&port=${port}&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&path=${encodeURIComponent(newPath)}`;
-  } else {
-    url = `/api/smb/mkdir?host=${encodeURIComponent(host)}&port=${port}&share=${encodeURIComponent(share||'')}&path=${encodeURIComponent(newPath)}&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`;
+function _elfInit() {
+  const { ip, port, proto, share, user, password } = _elfState;
+  const container = document.getElementById('elfinder-container');
+  const wrap = document.getElementById('elfinder-wrap');
+  wrap.classList.add(_elfThemeClass());
+
+  // Destroy previous instance if any
+  if (_elfInstance) {
+    try { _elfInstance.destroy(); } catch(e) {}
+    _elfInstance = null;
   }
-  try {
-    const r = await fetch(url, { method: 'POST' });
-    if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); fbStatus(e.detail||r.statusText, true); return; }
-    await fbNav(path);
-  } catch(e) { fbStatus(String(e), true); }
+  container.innerHTML = '';
+  const el = $('<div>').appendTo(container);
+
+  const connUrl = `/api/elfinder?proto=${encodeURIComponent(proto)}&host=${encodeURIComponent(ip)}&port=${port}&share=${encodeURIComponent(share)}&user=${encodeURIComponent(user)}&password=${encodeURIComponent(password)}`;
+
+  _elfInstance = el.elfinder({
+    url: connUrl,
+    height: '100%',
+    resizable: false,
+    useBrowserHistory: false,
+    rememberLastDir: false,
+    soundPath: '/static/elfinder/sounds/',
+    lang: 'en',
+    uiOptions: {
+      toolbar: [
+        ['back', 'forward', 'up'],
+        ['mkdir', 'upload'],
+        ['copy', 'cut', 'paste'],
+        ['rm'],
+        ['info'],
+        ['view', 'sort'],
+      ],
+    },
+    contextmenu: {
+      files: ['getfile', '|', 'open', 'download', '|', 'mkdir', 'upload', '|', 'copy', 'cut', 'paste', '|', 'rm', '|', 'info'],
+      navbar: ['open', '|', 'mkdir', '|', 'info'],
+      cwd: ['reload', 'back', '|', 'mkdir', 'upload', 'paste', '|', 'info'],
+    },
+  }).elfinder('instance');
 }
 
-async function fbDelete(path, isDir, name) {
-  if (!confirm(`Delete ${isDir ? 'folder' : 'file'} "${name}"?`)) return;
-  const { proto, host, port, share, user='', pass='' } = fbState;
-  let url;
-  if (proto === 'ftp') {
-    url = `/api/ftp/delete?host=${encodeURIComponent(host)}&port=${port}&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&path=${encodeURIComponent(path)}&is_dir=${isDir}`;
-  } else {
-    url = `/api/smb/delete?host=${encodeURIComponent(host)}&port=${port}&share=${encodeURIComponent(share||'')}&path=${encodeURIComponent(path)}&is_dir=${isDir}&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`;
+function _elfClose() {
+  document.getElementById('elfinder-modal').style.display = 'none';
+  if (_elfInstance) {
+    try { _elfInstance.destroy(); } catch(e) {}
+    _elfInstance = null;
   }
-  try {
-    const r = await fetch(url, { method: 'DELETE' });
-    if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); fbStatus(e.detail||r.statusText, true); return; }
-    await fbNav(fbState.path);
-  } catch(e) { fbStatus(String(e), true); }
+  document.getElementById('elfinder-wrap').classList.remove('elf-dark');
+  document.getElementById('elfinder-container').innerHTML = '';
+}
+
+document.getElementById('elf-close-btn').addEventListener('click', _elfClose);
+document.getElementById('elfinder-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('elfinder-modal')) _elfClose();
+});
+
+// Re-apply theme class when theme switches
+const _origApplyTheme = typeof applyTheme !== 'undefined' ? applyTheme : null;
+if (_origApplyTheme) {
+  // Wrap applyTheme to also update elFinder wrap class
+  window.applyTheme = function(name) {
+    _origApplyTheme(name);
+    const wrap = document.getElementById('elfinder-wrap');
+    wrap.classList.remove('elf-dark');
+    wrap.classList.add(_elfThemeClass());
+  };
 }
 </script>
 
