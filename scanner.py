@@ -96,96 +96,61 @@ def detect_lan_subnet(exit_node_ip: str | None = None) -> str | None:
 
 
 def scan_lan(subnet: str) -> list[dict]:
-    """Fast host discovery using masscan ICMP ping sweep."""
+    """Fast ping sweep — discovers live hosts."""
     try:
-        live_ips = _masscan_discover(subnet)
-        return [_ip_to_device(ip) for ip in live_ips]
+        result = subprocess.run(
+            ["nmap", "-sn", "-T5", "--min-parallelism", "100", "--max-parallelism", "256",
+             "--send-ip", "-oX", "-", subnet],
+            capture_output=True, text=True, timeout=60
+        )
+        return _parse_nmap_xml(result.stdout)
+    except FileNotFoundError:
+        return [{"error": "nmap not found — run start.sh to install"}]
+    except subprocess.TimeoutExpired:
+        return [{"error": "scan timed out"}]
     except Exception as e:
         return [{"error": str(e)}]
 
 
 def scan_lan_stream(subnet: str) -> Generator[dict, None, None]:
     """
-    Stream host discovery using masscan — emits one device per live host as found.
-    masscan outputs JSON lines; we parse each as it arrives.
-    After discovery, do a quick nmap reverse-DNS + MAC lookup batch.
+    Stream nmap ping sweep — emits one device per host as nmap finds it.
+    nmap flushes each <host>...</host> block to XML stdout as it completes.
     """
-    # masscan: ICMP echo + common ports to maximise discovery
-    # --rate 1000 is safe for most home/office LANs
     cmd = [
-        "masscan", subnet,
-        "-p", "0",          # port 0 = ICMP ping only (masscan uses --ping for ICMP)
-        "--ping",
-        "--rate", "1000",
-        "--wait", "2",
-        "-oJ", "-",         # JSON output to stdout
+        "nmap", "-sn", "-T5",
+        "--min-parallelism", "100", "--max-parallelism", "256",
+        "--send-ip", "-oX", "-", subnet
     ]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     except FileNotFoundError:
-        yield {"error": "masscan not found — install with: apt install masscan"}
+        yield {"error": "nmap not found — run start.sh to install"}
         return
 
-    seen = set()
+    in_host = False
+    host_buf = ""
     try:
         for line in proc.stdout:
-            line = line.strip().rstrip(",")
-            if not line or line in ("{", "}", "[]", "[", "]"):
-                continue
-            try:
-                entry = json.loads(line)
-                ip = entry.get("ip", "")
-                if ip and ip not in seen:
-                    seen.add(ip)
-                    yield _ip_to_device(ip)
-            except (json.JSONDecodeError, KeyError):
-                continue
+            stripped = line.strip()
+            if "<host " in stripped or stripped == "<host>":
+                in_host = True
+                host_buf = line
+            elif in_host:
+                host_buf += line
+                if "</host>" in stripped:
+                    in_host = False
+                    try:
+                        devices = _parse_nmap_xml(f"<nmaprun>{host_buf}</nmaprun>")
+                        for d in devices:
+                            yield d
+                    except Exception:
+                        pass
+                    host_buf = ""
     except Exception as e:
         yield {"error": str(e)}
     finally:
         proc.wait()
-
-
-def _masscan_discover(subnet: str) -> list[str]:
-    """Run masscan and return list of live IPs."""
-    result = subprocess.run(
-        ["masscan", subnet, "--ping", "--rate", "1000", "--wait", "2", "-oJ", "-"],
-        capture_output=True, text=True, timeout=30
-    )
-    ips = []
-    seen = set()
-    for line in result.stdout.splitlines():
-        line = line.strip().rstrip(",")
-        if not line or line in ("{", "}", "[]", "[", "]"):
-            continue
-        try:
-            entry = json.loads(line)
-            ip = entry.get("ip", "")
-            if ip and ip not in seen:
-                seen.add(ip)
-                ips.append(ip)
-        except (json.JSONDecodeError, KeyError):
-            continue
-    ips.sort(key=lambda x: tuple(int(o) for o in x.split(".")))
-    return ips
-
-
-def _ip_to_device(ip: str) -> dict:
-    """Build a device dict for a discovered IP — quick reverse DNS only."""
-    import socket
-    hostname = ip
-    try:
-        hostname = socket.gethostbyaddr(ip)[0]
-    except Exception:
-        pass
-    return {
-        "ip": ip,
-        "hostname": hostname,
-        "mac": "N/A",
-        "vendor": "N/A (routed)",
-        "ping_ms": None,
-        "status": "up",
-    }
 
 
 # Ports worth scanning: ssh, ftp, telnet, smtp, http, https, smb, rdp, vnc,
