@@ -31,39 +31,38 @@ def get_wan_geo() -> dict:
         return {"ip": "error", "error": str(e)}
 
 
-def detect_lan_subnet(exit_node_ip: str | None = None) -> str | None:
+def detect_lan_subnets(exit_node_ip: str | None = None) -> list[str]:
     """
-    Detect the LAN subnet to scan.
-    When using an exit node, the remote LAN is not in our routing table.
-    We ask ip-api.com (via the exit node) — but for subnet detection we
-    look at what Tailscale reports as the exit node's advertised routes,
-    or fall back to a standard private-range guess based on WAN geo.
+    Return all LAN subnets advertised by the exit node peer (AllowedIPs),
+    falling back to the local routing table.  Returns a list so multiple
+    subnets (e.g. 192.168.0.0/24 + 10.0.0.0/24) are all scanned.
+    """
+    subnets: list[str] = []
 
-    Simpler approach: use the exit node peer's AllowedIPs from tailscale status
-    to find any advertised private subnet, otherwise fall back to ip route.
-    """
-    # Try to get advertised subnet routes from tailscale status (exit node may advertise its LAN)
+    # Primary: parse AllowedIPs from tailscale status for the active exit node
     if exit_node_ip:
         try:
-            import subprocess, json
+            import subprocess, json as _json
             result = subprocess.run(
                 ["tailscale", "status", "--json"],
                 capture_output=True, text=True, timeout=10
             )
-            status = json.loads(result.stdout)
+            status = _json.loads(result.stdout)
             for _, peer in status.get("Peer", {}).items():
                 ips = peer.get("TailscaleIPs", [])
                 if ips and ips[0] == exit_node_ip:
                     for route in peer.get("AllowedIPs", []):
-                        # Private subnets only, not Tailscale ranges
-                        if route.startswith("100.") or route == "0.0.0.0/0" or route == "::/0":
+                        if route.startswith("100.") or route in ("0.0.0.0/0", "::/0"):
                             continue
                         if any(route.startswith(p) for p in ("10.", "172.", "192.168.")):
-                            return route
+                            subnets.append(route)
         except Exception:
             pass
 
-    # Fall back to local routing table — skip Docker/k8s/Tailscale ranges
+    if subnets:
+        return subnets
+
+    # Fallback: local routing table (no exit node, or AllowedIPs empty)
     SKIP_IFACES = {"docker0", "br-", "cni", "flannel", "cali", "veth", "tailscale"}
     try:
         result = subprocess.run(
@@ -79,10 +78,8 @@ def detect_lan_subnet(exit_node_ip: str | None = None) -> str | None:
                 continue
             if subnet.startswith("100.") or subnet.startswith("127."):
                 continue
-            # Skip Docker/k8s bridge subnets (172.16-31 used by Docker by default)
             if subnet.startswith("172."):
                 continue
-            # Check the dev interface if present
             if "dev" in parts:
                 dev_idx = parts.index("dev") + 1
                 if dev_idx < len(parts):
@@ -90,10 +87,17 @@ def detect_lan_subnet(exit_node_ip: str | None = None) -> str | None:
                     if any(dev.startswith(skip) for skip in SKIP_IFACES):
                         continue
             if "/" in subnet and any(subnet.startswith(p) for p in ("10.", "192.168.")):
-                return subnet
-        return None
+                subnets.append(subnet)
     except Exception:
-        return None
+        pass
+
+    return subnets
+
+
+def detect_lan_subnet(exit_node_ip: str | None = None) -> str | None:
+    """Backwards-compat shim — returns first subnet or None."""
+    s = detect_lan_subnets(exit_node_ip)
+    return s[0] if s else None
 
 
 def _fping_device(ip: str) -> dict:
