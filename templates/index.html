@@ -119,8 +119,9 @@
   .status-up { color: var(--green); font-weight: 600; }
   .ip-cell { font-family: monospace; color: var(--accent); white-space: nowrap; }
 
-  /* Hide empty rows */
-  body.hide-empty tr.no-ports { display: none; }
+  /* Hide empty rows (default on) */
+  tr.no-ports { display: none; }
+  body.show-empty tr.no-ports { display: table-row; }
 
   /* Port chips */
   .port-chips { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -202,7 +203,7 @@
   </div>
   <div class="spacer"></div>
   <button class="btn btn-danger" id="disconnect-btn" style="display:none" onclick="disconnectExit()">Disconnect</button>
-  <button class="btn btn-ghost" id="toggle-empty-btn" onclick="toggleEmpty()" style="display:none">Hide empty</button>
+  <button class="btn btn-ghost" id="toggle-empty-btn" onclick="toggleEmpty()" style="display:none">Show all</button>
   <a href="/logout"><button class="btn btn-ghost">Logout</button></a>
 </div>
 
@@ -596,8 +597,8 @@ function schedulePortRescan() {
 // ── Toggle empty rows ────────────────────────────────────────────────────────
 
 function toggleEmpty() {
-  const hiding = document.body.classList.toggle('hide-empty');
-  document.getElementById('toggle-empty-btn').textContent = hiding ? 'Show all' : 'Hide empty';
+  const showing = document.body.classList.toggle('show-empty');
+  document.getElementById('toggle-empty-btn').textContent = showing ? 'Hide empty' : 'Show all';
 }
 
 // ── Auto-refresh ─────────────────────────────────────────────────────────────
