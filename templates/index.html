@@ -122,6 +122,7 @@
   /* Hide empty rows (default on) — only after port scan has completed */
   tr.no-ports:not(.scanning) { display: none; }
   body.show-empty tr.no-ports { display: table-row; }
+  tr.cached-row td { opacity: 0.7; }
 
   /* Port chips */
   .port-chips { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -418,11 +419,53 @@ function runScan() {
         `LAN Devices — ${d.subnet} (scanning...)`;
     }
 
-    else if (d.type === 'device') {
-      seenIPs.add(d.ip);
+    else if (d.type === 'cached') {
+      // Cached device from a previous scan — show immediately with cached port data
       const isNew = !knownDevices[d.ip];
       knownDevices[d.ip] = d;
       const key = d.ip.replace(/\./g, '-');
+      const tbody = document.getElementById('device-tbody');
+      if (isNew) {
+        const row = document.createElement('tr');
+        row.id = `row-${key}`;
+        row.className = 'device-row scanning cached-row';
+        row.innerHTML = deviceRowHTML(d);
+        const rows = tbody.querySelectorAll('tr[id^="row-"]');
+        let inserted = false;
+        for (const r of rows) {
+          const rip = r.id.replace('row-','').replace(/-/g,'.');
+          if (ipNum(d.ip) < ipNum(rip)) { tbody.insertBefore(row, r); inserted = true; break; }
+        }
+        if (!inserted) tbody.appendChild(row);
+      }
+      // If cached device has port data, render it now instead of spinning
+      if (d.open_ports) {
+        renderPortsFromCache(d.ip, d.open_ports);
+      } else {
+        portScanQueue.push(d.ip);
+        drainPortScanQueue();
+      }
+      const title = document.getElementById('device-card-title');
+      if (title) title.textContent = `LAN Devices — ${Object.keys(knownDevices).length} (cached)`;
+    }
+
+    else if (d.type === 'cache_done') {
+      const ago = d.scanned_at ? Math.round((Date.now()/1000 - d.scanned_at) / 60) : null;
+      const agoStr = ago !== null ? ` · cached ${ago}m ago` : '';
+      const bar = document.getElementById('scan-bar');
+      if (bar) bar.innerHTML = `
+        <span style="color:var(--muted);">📦 Showing cached results${agoStr} · live scan in progress...</span>`;
+    }
+
+    else if (d.type === 'device') {
+      seenIPs.add(d.ip);
+      const isNew = !knownDevices[d.ip];
+      // Clear cached marker on this row if present
+      const key = d.ip.replace(/\./g, '-');
+      const existingRow = document.getElementById(`row-${key}`);
+      if (existingRow) existingRow.classList.remove('cached-row');
+
+      knownDevices[d.ip] = d;
       const tbody = document.getElementById('device-tbody');
 
       if (isNew) {
@@ -430,25 +473,16 @@ function runScan() {
         row.id = `row-${key}`;
         row.className = 'device-row scanning';
         row.innerHTML = deviceRowHTML(d);
-
-        // Insert sorted by IP
         const rows = tbody.querySelectorAll('tr[id^="row-"]');
         let inserted = false;
         for (const r of rows) {
           const rip = r.id.replace('row-','').replace(/-/g,'.');
-          if (ipNum(d.ip) < ipNum(rip)) {
-            tbody.insertBefore(row, r);
-            inserted = true; break;
-          }
+          if (ipNum(d.ip) < ipNum(rip)) { tbody.insertBefore(row, r); inserted = true; break; }
         }
         if (!inserted) tbody.appendChild(row);
-      }
-      // Queue port scan immediately for new IPs (or re-queue on refresh if showing spinner)
-      if (isNew) {
         portScanQueue.push(d.ip);
         drainPortScanQueue();
       }
-
       const title = document.getElementById('device-card-title');
       if (title) title.textContent =
         `LAN Devices — scanning... (${Object.keys(knownDevices).length} found)`;
@@ -464,7 +498,7 @@ function runScan() {
       src.close();
       activeScanSource = null;
 
-      // Remove rows for IPs that disappeared
+      // Remove rows for IPs that disappeared since last scan
       for (const ip of Object.keys(knownDevices)) {
         if (!seenIPs.has(ip)) {
           const key = ip.replace(/\./g, '-');
@@ -483,8 +517,6 @@ function runScan() {
       if (title) title.textContent = `LAN Devices — ${d.count} found`;
 
       resetCountdown();
-
-      // Schedule silent port rescan of all known devices in 300s
       schedulePortRescan();
     }
   };
@@ -505,6 +537,43 @@ function deviceRowHTML(d) {
     <td id="ports-inline-${key}">
       <div class="ports-scanning"><div class="spinner-sm"></div><span>queued</span></div>
     </td>`;
+}
+
+function renderPortsFromCache(ip, open_ports) {
+  const key = ip.replace(/\./g, '-');
+  const cell = document.getElementById(`ports-inline-${key}`);
+  const row = document.getElementById(`row-${key}`);
+  if (!cell) return;
+  if (!row) return;
+  row.classList.remove('scanning');
+  if (!open_ports || open_ports.length === 0) {
+    cell.innerHTML = `<span style="color:var(--muted);font-size:11px;">—</span>`;
+    row.classList.add('no-ports');
+    document.getElementById('toggle-empty-btn').style.display = '';
+  } else {
+    row.classList.remove('no-ports');
+    cell.innerHTML = `<div class="port-chips">${buildChips(ip, open_ports)}</div>`;
+  }
+}
+
+function buildChips(ip, ports) {
+  return ports.map(p => {
+    const browsable = [
+      80, 443, 8080, 8081, 8082, 8090, 8443, 8006, 8007,
+      8123, 8888, 5000, 5001, 8001, 32400, 10000, 9090, 9091,
+      3000, 3001, 4000, 4200, 7000, 7001, 8096, 8097, 8920,
+      7878, 8989, 8686, 9696, 8787, 5055, 5299, 9117, 9443,
+      1880, 9000, 9393, 9999, 4040, 8200
+    ].includes(p.port);
+    const tip = browsable ? `${escHtml(p.service)} — click to browse` : escHtml(p.service);
+    const scheme = [443, 8443, 8006].includes(p.port) ? 'https' : 'http';
+    const tUrl = encodeURIComponent(`${scheme}://${ip}:${p.port}/`);
+    if (browsable) {
+      return `<a class="port-chip" href="/proxy?t=${tUrl}" target="_blank">${p.port}<span class="chip-tip">${tip}</span></a>`;
+    } else {
+      return `<span class="port-chip no-browse">${p.port}<span class="chip-tip">${tip}</span></span>`;
+    }
+  }).join('');
 }
 
 function ipNum(ip) {
@@ -536,52 +605,39 @@ async function portScan(ip) {
   const cell = document.getElementById(`ports-inline-${key}`);
   if (!cell) return;
 
-  cell.innerHTML = `<div class="ports-scanning"><div class="spinner-sm"></div><span style="font-size:11px;">scanning...</span></div>`;
+  // Don't re-show spinner on rows that already have cached port data (live scan refreshing)
+  const row = document.getElementById(`row-${key}`);
+  if (!row || row.classList.contains('cached-row')) {
+    // Keep existing display while refreshing silently
+  } else {
+    cell.innerHTML = `<div class="ports-scanning"><div class="spinner-sm"></div><span style="font-size:11px;">scanning...</span></div>`;
+  }
 
   try {
     const r = await fetch(`/api/port-scan?ip=${encodeURIComponent(ip)}`);
     const d = await r.json();
+    if (row) row.classList.remove('scanning', 'cached-row');
     if (d.error) {
       cell.innerHTML = `<span style="color:var(--red);font-size:11px;">⚠ ${escHtml(d.error)}</span>`;
-      const row = document.getElementById(`row-${key}`);
-      if (row) row.classList.remove('scanning');
     } else {
       const ports = d.open_ports || [];
-      const row = document.getElementById(`row-${key}`);
-      if (row) row.classList.remove('scanning');
       if (ports.length === 0) {
         cell.innerHTML = `<span style="color:var(--muted);font-size:11px;">—</span>`;
         if (row) row.classList.add('no-ports');
         document.getElementById('toggle-empty-btn').style.display = '';
       } else {
         if (row) row.classList.remove('no-ports');
-        const chips = ports.map(p => {
-          const browsable = [
-            80, 443, 8080, 8081, 8082, 8090, 8443, 8006, 8007,
-            8123, 8888, 5000, 5001, 8001, 32400, 10000, 9090, 9091,
-            3000, 3001, 4000, 4200, 7000, 7001, 8096, 8097, 8920,
-            7878, 8989, 8686, 9696, 8787, 5055, 5299, 9117, 9443,
-            1880, 9000, 9393, 9999, 4040, 8200, 9090
-          ].includes(p.port);
-          const tip = browsable
-            ? `${escHtml(p.service)} — click to browse`
-            : escHtml(p.service);
-          if (browsable) {
-            return `<a class="port-chip" href="/browse?ip=${encodeURIComponent(ip)}&port=${p.port}" target="_blank">
-              ${p.port}<span class="chip-tip">${tip}</span>
-            </a>`;
-          } else {
-            return `<span class="port-chip no-browse">
-              ${p.port}<span class="chip-tip">${tip}</span>
-            </span>`;
-          }
-        }).join('');
-        cell.innerHTML = `<div class="port-chips">${chips}</div>`;
+        cell.innerHTML = `<div class="port-chips">${buildChips(ip, ports)}</div>`;
       }
+      // Push port results to server cache
+      fetch('/api/cache/ports', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({[ip]: {open_ports: ports, os_guess: d.os_guess}})
+      }).catch(() => {});
     }
   } catch(e) {
     cell.innerHTML = `<span style="color:var(--red);font-size:11px;">failed</span>`;
-    const row = document.getElementById(`row-${key}`);
     if (row) row.classList.remove('scanning');
   }
 }
