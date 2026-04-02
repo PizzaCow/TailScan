@@ -3,18 +3,29 @@ set -e
 
 echo "=== TailScan Setup ==="
 
-# Install nmap if missing
+install_pkg() {
+  local pkg=$1
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get install -y "$pkg"
+  elif command -v dnf &>/dev/null; then
+    sudo dnf install -y "$pkg"
+  elif command -v yum &>/dev/null; then
+    sudo yum install -y "$pkg"
+  else
+    echo "WARNING: Could not install $pkg automatically. Install it manually."
+  fi
+}
+
+# masscan — fast host discovery (needs root/raw sockets)
+if ! command -v masscan &>/dev/null; then
+  echo "Installing masscan..."
+  install_pkg masscan
+fi
+
+# nmap — used for on-demand port scanning per device
 if ! command -v nmap &>/dev/null; then
   echo "Installing nmap..."
-  if command -v apt-get &>/dev/null; then
-    sudo apt-get install -y nmap
-  elif command -v dnf &>/dev/null; then
-    sudo dnf install -y nmap
-  elif command -v yum &>/dev/null; then
-    sudo yum install -y nmap
-  else
-    echo "WARNING: Could not install nmap automatically. Install it manually."
-  fi
+  install_pkg nmap
 fi
 
 # Install Python deps
