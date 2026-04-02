@@ -1,5 +1,7 @@
 """TailScan — FastAPI app."""
 
+VERSION = "0.02"
+
 import os
 import time
 import logging
@@ -242,169 +244,277 @@ async def api_cache_ports_save(request: Request):
 
 # ─── Proxy ──────────────────────────────────────────────────────────────────
 # URL format: /proxy?t=http://192.168.0.25:8989/path
-# This keeps real-looking URLs in the browser address bar.
+# Extra query params (e.g. ?t=http://ip/search&q=foo) are forwarded to target.
 
-def _proxy_url(target_url: str) -> str:
-    """Build the TailScan proxy URL for a given target."""
-    from urllib.parse import quote
-    return f"/proxy?t={quote(target_url, safe=':/?=&')}"
+from urllib.parse import urlparse, quote, unquote, urljoin
 
-def _rw_url(url: str, origin: str, proxy_prefix: str) -> str:
-    """Rewrite a URL to go through the proxy."""
-    if not url:
-        return url
-    if url.startswith(origin):
-        path = url[len(origin):]
-        return proxy_prefix + (path or "/")
-    if url.startswith("/") and not url.startswith("//"):
-        return proxy_prefix + url
-    return url
+
+def _make_proxy_url(target_url: str) -> str:
+    return f"/proxy?t={quote(target_url, safe='')}"
+
+
+def _rewrite_url(url: str, origin: str, base_path: str = "/") -> str | None:
+    """
+    Rewrite a URL to go through /proxy?t=...
+    Returns None if the URL should not be rewritten (relative fragment, data:, blob:, etc.)
+    base_path: the path of the current proxied page, for resolving relative URLs.
+    """
+    if not url or not isinstance(url, str):
+        return None
+    if url.startswith(("#", "javascript:", "data:", "blob:", "mailto:", "tel:")):
+        return None
+    # Already proxied
+    if url.startswith("/proxy?t="):
+        return None
+    # Absolute URL — only rewrite same origin
+    if url.startswith("http://") or url.startswith("https://"):
+        if url.startswith(origin):
+            return _make_proxy_url(url)
+        return None  # external URL — leave it alone
+    # Protocol-relative
+    if url.startswith("//"):
+        return None
+    # Root-relative
+    if url.startswith("/"):
+        return _make_proxy_url(origin + url)
+    # Relative URL — resolve against base_path
+    resolved = urljoin(origin + base_path, url)
+    if resolved.startswith(origin):
+        return _make_proxy_url(resolved)
+    return None
+
+
+def _inject_interceptor(text: str, origin: str, base_path: str) -> str:
+    """Inject JS interceptor that handles all navigation/fetch in proxied pages."""
+    interceptor = f"""<script>
+(function(){{
+  var _O={json.dumps(origin)};
+  var _B={json.dumps(base_path)};
+  function _enc(u){{return encodeURIComponent(u);}}
+  function _rw(url){{
+    if(!url||typeof url!=='string')return url;
+    if(url.startsWith('#')||url.startsWith('javascript:')||url.startsWith('data:')||
+       url.startsWith('blob:')||url.startsWith('mailto:')||url.startsWith('tel:'))return url;
+    if(url.startsWith('/proxy?t='))return url;
+    if(url.startsWith(_O))return '/proxy?t='+_enc(url);
+    if(url.startsWith('http://')||url.startsWith('https://'))return url; // external
+    if(url.startsWith('//'))return url;
+    if(url.startsWith('/'))return '/proxy?t='+_enc(_O+url);
+    // Relative URL
+    try{{
+      var abs=new URL(url,_O+_B).href;
+      if(abs.startsWith(_O))return '/proxy?t='+_enc(abs);
+    }}catch(e){{}}
+    return url;
+  }}
+  // Patch fetch
+  var _ft=window.fetch;
+  window.fetch=function(i,o){{
+    if(typeof i==='string')i=_rw(i);
+    else if(i instanceof Request)i=new Request(_rw(i.url),i);
+    return _ft.call(this,i,o);
+  }};
+  // Patch XHR
+  var _xo=XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open=function(m,u){{arguments[1]=_rw(u);return _xo.apply(this,arguments);}};
+  // Patch history
+  var _hp=history.pushState.bind(history);
+  history.pushState=function(s,t,u){{return _hp(s,t,u?_rw(u):u);}};
+  var _hr=history.replaceState.bind(history);
+  history.replaceState=function(s,t,u){{return _hr(s,t,u?_rw(u):u);}};
+  // Patch window.location setter (covers window.location = '...' and .href = '...')
+  try{{
+    var _locDesc=Object.getOwnPropertyDescriptor(window,'location');
+    if(!_locDesc||_locDesc.configurable){{
+      var _locProto=Object.getOwnPropertyDescriptor(Location.prototype,'href');
+      if(_locProto&&_locProto.set){{
+        var _origSet=_locProto.set;
+        Object.defineProperty(Location.prototype,'href',{{
+          get:_locProto.get,
+          set:function(u){{return _origSet.call(this,_rw(u));}},
+          configurable:true
+        }});
+      }}
+    }}
+  }}catch(e){{}}
+  // Patch window.location.assign / replace
+  var _la=window.location.assign.bind(window.location);
+  try{{window.location.assign=function(u){{return _la(_rw(u));}};}}catch(e){{}}
+  var _lr=window.location.replace.bind(window.location);
+  try{{window.location.replace=function(u){{return _lr(_rw(u));}};}}catch(e){{}}
+  // Click interceptor — catches dynamic links and forms
+  document.addEventListener('click',function(e){{
+    var el=e.target.closest('a[href]');
+    if(!el)return;
+    var h=el.getAttribute('href');
+    var rw=_rw(h);
+    if(rw&&rw!==h){{e.preventDefault();window.location.href=rw;}}
+  }},true);
+  // Form submit interceptor — catches GET forms (like Google search)
+  document.addEventListener('submit',function(e){{
+    var f=e.target;
+    if(!f||f.method&&f.method.toLowerCase()==='post')return;
+    var action=f.action||window.location.href;
+    var rw=_rw(action);
+    if(rw&&rw!==action){{
+      e.preventDefault();
+      var params=new URLSearchParams(new FormData(f));
+      window.location.href=rw+(rw.includes('?')?'&':'?')+params.toString();
+    }}
+  }},true);
+}})();
+</script>"""
+    if "</head>" in text:
+        return text.replace("</head>", interceptor + "\n</head>", 1)
+    if "<body" in text:
+        return re.sub(r'(<body[^>]*>)', r'\1' + interceptor, text, count=1)
+    return interceptor + text
 
 
 @app.get("/browse", response_class=HTMLResponse)
 def browse(request: Request, ip: str, port: int = 80):
-    """Redirect into the proxy with a clean ?t= URL."""
+    """Redirect into the proxy."""
     if not get_session(request):
         return RedirectResponse("/login")
     scheme = "https" if port in (443, 8443, 8006) else "http"
-    from urllib.parse import quote
-    return RedirectResponse(f"/proxy?t={quote(f'{scheme}://{ip}:{port}/', safe=':/?=&')}")
+    return RedirectResponse(f"/proxy?t={quote(f'{scheme}://{ip}:{port}/', safe='')}")
 
 
-@app.api_route("/proxy", methods=["GET", "POST", "PUT", "DELETE"])
+def _error_page(msg: str, target: str, code: int) -> HTMLResponse:
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html><head><title>TailScan Proxy Error</title>
+<style>body{{font-family:sans-serif;background:#191724;color:#e0def4;display:flex;
+align-items:center;justify-content:center;height:100vh;margin:0;}}
+.box{{text-align:center;}} h2{{color:#eb6f92;}} a{{color:#9ccfd8;}}
+code{{background:#1f1d2e;padding:4px 8px;border-radius:4px;font-size:13px;}}
+</style></head><body><div class="box">
+<h2>{"⏱ Timed Out" if code==504 else "🔌 Connection Failed" if code==502 else "⚠ Proxy Error"}</h2>
+<p>{msg}</p>
+<p><code>{target}</code></p>
+<p><a href="javascript:history.back()">← Go back</a></p>
+</div></body></html>""", status_code=code)
+
+
+@app.api_route("/proxy", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def proxy(request: Request):
-    """
-    Transparent HTTP proxy via ?t=<target_url>.
-    Browser address bar shows: /proxy?t=http://192.168.0.25:8989/settings
-    """
+    """Transparent HTTP proxy. URL: /proxy?t=<full_target_url>"""
     if not get_session(request):
         raise HTTPException(401)
 
-    from urllib.parse import urlparse, urlencode, parse_qs, quote, unquote
-
-    # Extract target from ?t= parameter
     t_param = request.query_params.get("t")
     if not t_param:
         raise HTTPException(400, "Missing ?t= parameter")
+
+    # Forward any extra query params as part of the target URL
+    extra = {k: v for k, v in request.query_params.multi_items() if k != "t"}
     target_url = t_param
-    # Re-append any extra query params that belong to the target URL
-    extra = {k: v for k, v in request.query_params.items() if k != "t"}
     if extra:
-        target_url += ("&" if "?" in target_url else "?") + "&".join(f"{k}={quote(v)}" for k, v in extra.items())
+        sep = "&" if "?" in target_url else "?"
+        target_url += sep + "&".join(f"{quote(k)}={quote(v)}" for k, v in extra)
 
     parsed = urlparse(target_url)
     if parsed.scheme not in ("http", "https"):
         raise HTTPException(400, "Invalid scheme")
 
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    # proxy_prefix: /proxy?t=http://ip:port  (path will be appended)
-    proxy_prefix = f"/proxy?t={quote(origin, safe=':/?=&')}"
+    # base_path for relative URL resolution (path portion of the proxied page)
+    base_path = parsed.path or "/"
 
-    headers = {k: v for k, v in request.headers.items()
-               if k.lower() not in ("host", "connection", "transfer-encoding", "referer")}
+    # Strip hop-by-hop and problematic headers
+    skip_req = {"host", "connection", "transfer-encoding", "referer",
+                "accept-encoding"}  # let httpx handle compression
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in skip_req}
     headers["host"] = parsed.netloc
 
     body = await request.body()
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=15, follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=httpx.Timeout(30.0, connect=10.0),
+            follow_redirects=False,
+            limits=httpx.Limits(max_connections=10)
+        ) as client:
             resp = await client.request(
                 method=request.method,
                 url=target_url,
                 headers=headers,
                 content=body,
             )
-    except httpx.ConnectError:
-        return HTMLResponse("<h3 style='font-family:sans-serif;padding:20px'>Could not connect to device</h3>", status_code=502)
+    except httpx.ConnectError as e:
+        return _error_page(f"Could not connect: {e}", target_url, 502)
     except httpx.TimeoutException:
-        return HTMLResponse("<h3 style='font-family:sans-serif;padding:20px'>Connection timed out</h3>", status_code=504)
+        return _error_page("The device took too long to respond.", target_url, 504)
+    except Exception as e:
+        return _error_page(str(e), target_url, 502)
 
-    resp_headers = {k: v for k, v in resp.headers.items()
-                    if k.lower() not in ("content-encoding", "transfer-encoding",
-                                         "content-security-policy", "x-frame-options",
-                                         "content-length")}
+    skip_resp = {"content-encoding", "transfer-encoding", "content-security-policy",
+                 "x-frame-options", "content-length", "strict-transport-security"}
+    resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in skip_resp}
 
     # Handle redirects — rewrite Location through proxy
     if resp.status_code in (301, 302, 303, 307, 308):
         loc = resp_headers.get("location", "")
         if loc:
-            # Absolute redirect
             if loc.startswith("http://") or loc.startswith("https://"):
-                resp_headers["location"] = f"/proxy?t={quote(loc, safe=':/?=&')}"
+                resp_headers["location"] = _make_proxy_url(loc)
             else:
-                # Root-relative redirect
-                new_target = origin + (loc if loc.startswith("/") else "/" + loc)
-                resp_headers["location"] = f"/proxy?t={quote(new_target, safe=':/?=&')}"
+                resolved = urljoin(origin + base_path, loc)
+                resp_headers["location"] = _make_proxy_url(resolved)
         return Response(content=b"", status_code=resp.status_code, headers=resp_headers)
 
     content_type = resp.headers.get("content-type", "")
     content = resp.content
 
-    # Rewrite HTML: fix links + inject JS interceptor for SPA navigation
     if "text/html" in content_type:
-        text = content.decode("utf-8", errors="replace")
+        text = content.decode(resp.charset_encoding or "utf-8", errors="replace")
 
-        # Rewrite root-relative href/src/action="/path"
+        # Remove any <base href> — it breaks relative URL resolution
+        text = re.sub(r'<base\s[^>]*>', '', text, flags=re.IGNORECASE)
+
+        # Rewrite static HTML attributes: href, src, action, srcset
+        def rewrite_attr(m):
+            attr, q, url = m.group(1), m.group(2), m.group(3)
+            rw = _rewrite_url(url, origin, base_path)
+            return f'{attr}={q}{rw}{q}' if rw else m.group(0)
+
         text = re.sub(
-            r'(href|src|action)=(["\'])/(?!/)',
-            lambda m: f'{m.group(1)}={m.group(2)}{proxy_prefix}/',
+            r'(href|src|action|data-src)=(["\'])([^"\']+)\2',
+            rewrite_attr, text, flags=re.IGNORECASE
+        )
+        # srcset (comma-separated URL descriptors)
+        def rewrite_srcset(m):
+            parts = []
+            for entry in m.group(1).split(","):
+                entry = entry.strip()
+                pieces = entry.split(None, 1)
+                if pieces:
+                    rw = _rewrite_url(pieces[0], origin, base_path)
+                    if rw:
+                        pieces[0] = rw
+                parts.append(" ".join(pieces))
+            return f'srcset="{", ".join(parts)}"'
+        text = re.sub(r'srcset="([^"]+)"', rewrite_srcset, text, flags=re.IGNORECASE)
+
+        # Rewrite absolute origin URLs left in inline JS/CSS strings
+        text = re.sub(
+            rf'(["\']){re.escape(origin)}(/[^"\']*)?(["\'])',
+            lambda m: f'{m.group(1)}{_make_proxy_url(origin + (m.group(2) or "/"))}{m.group(3)}',
             text
         )
-        # Rewrite absolute origin URLs
-        text = re.sub(
-            rf'{re.escape(origin)}(/[^"\'> ]*)?',
-            lambda m: f"{proxy_prefix}{m.group(1) or '/'}",
-            text
-        )
 
-        # JS interceptor: patches fetch, XHR, history, and link clicks
-        interceptor = f"""<script>
-(function() {{
-  var _pfx = {json.dumps(proxy_prefix)};
-  var _orig = {json.dumps(origin)};
-  function _rw(url) {{
-    if (!url || typeof url !== 'string') return url;
-    if (url.startsWith(_orig)) return _pfx + (url.slice(_orig.length) || '/');
-    if (url.startsWith('/') && !url.startsWith('//') && !url.startsWith('/proxy'))
-      return _pfx + url;
-    return url;
-  }}
-  var _fetch = window.fetch;
-  window.fetch = function(input, init) {{
-    if (typeof input === 'string') input = _rw(input);
-    else if (input instanceof Request) input = new Request(_rw(input.url), input);
-    return _fetch.call(this, input, init);
-  }};
-  var _xhrOpen = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(m, url) {{
-    arguments[1] = _rw(url); return _xhrOpen.apply(this, arguments);
-  }};
-  var _push = history.pushState.bind(history);
-  history.pushState = function(s,t,url) {{ return _push(s,t,url?_rw(url):url); }};
-  var _repl = history.replaceState.bind(history);
-  history.replaceState = function(s,t,url) {{ return _repl(s,t,url?_rw(url):url); }};
-  document.addEventListener('click', function(e) {{
-    var el = e.target.closest('a[href]');
-    if (!el) return;
-    var h = el.getAttribute('href');
-    if (!h || h.startsWith('#') || h.startsWith('javascript:')) return;
-    var rw = _rw(h);
-    if (rw !== h) {{ e.preventDefault(); window.location.href = rw; }}
-  }}, true);
-}})();
-</script>"""
-        if "</head>" in text:
-            text = text.replace("</head>", interceptor + "</head>", 1)
-        elif "<body" in text:
-            text = re.sub(r'(<body[^>]*>)', r'\1' + interceptor, text, count=1)
-        else:
-            text = interceptor + text
+        # Inject JS interceptor (handles runtime navigation, fetch, XHR, forms)
+        text = _inject_interceptor(text, origin, base_path)
 
         content = text.encode("utf-8")
         resp_headers["content-type"] = "text/html; charset=utf-8"
 
     return Response(content=content, status_code=resp.status_code,
                     headers=resp_headers, media_type=content_type)
+
+
+@app.get("/api/version")
+def api_version():
+    return {"version": VERSION}
 
 
 if __name__ == "__main__":
