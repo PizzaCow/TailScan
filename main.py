@@ -1,6 +1,6 @@
 """TailScan — FastAPI app."""
 
-VERSION = "0.02"
+VERSION = "0.03"
 
 import os
 import time
