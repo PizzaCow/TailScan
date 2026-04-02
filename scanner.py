@@ -94,13 +94,8 @@ def detect_lan_subnet(exit_node_ip: str | None = None) -> str | None:
 
 
 def scan_lan(subnet: str) -> list[dict]:
-    """
-    Two-phase scan:
-    1. Fast ping sweep to discover live hosts
-    2. Quick top-20 port scan + OS detection on each live host
-    """
+    """Fast ping sweep only — discovers live hosts."""
     try:
-        # Phase 1: ping sweep, fast timing
         result = subprocess.run(
             ["nmap", "-sn", "-T4", "--send-ip", "-oX", "-", subnet],
             capture_output=True, text=True, timeout=60
@@ -110,39 +105,43 @@ def scan_lan(subnet: str) -> list[dict]:
                 ["nmap", "-sn", "-T4", "-oX", "-", subnet],
                 capture_output=True, text=True, timeout=60
             )
-
-        devices = _parse_nmap_xml(result.stdout)
-
-        if not devices:
-            return devices
-
-        # Phase 2: port scan live hosts (top 20 common ports, OS detection)
-        live_ips = [d["ip"] for d in devices if d.get("ip")]
-        if live_ips:
-            port_result = subprocess.run(
-                ["nmap", "-T4", "--top-ports", "20", "-O", "--osscan-limit",
-                 "-oX", "-", "--send-ip"] + live_ips,
-                capture_output=True, text=True, timeout=120
-            )
-            if port_result.returncode != 0:
-                port_result = subprocess.run(
-                    ["nmap", "-T4", "--top-ports", "20", "-O", "--osscan-limit",
-                     "-oX", "-"] + live_ips,
-                    capture_output=True, text=True, timeout=120
-                )
-            port_data = _parse_nmap_ports_xml(port_result.stdout)
-            # Merge port data into devices
-            for device in devices:
-                extra = port_data.get(device["ip"], {})
-                device.update(extra)
-
-        return devices
+        return _parse_nmap_xml(result.stdout)
     except FileNotFoundError:
         return [{"error": "nmap not found — run start.sh to install"}]
     except subprocess.TimeoutExpired:
         return [{"error": "scan timed out"}]
     except Exception as e:
         return [{"error": str(e)}]
+
+
+# Ports worth scanning: ssh, ftp, telnet, smtp, http, https, smb, rdp, vnc,
+# netbios, snmp, mysql, mssql, postgres, redis, mongodb, http-alt, plex,
+# homeassistant, synology dsm, unifi, proxmox, esxi, ipmi
+COMMON_PORTS = "21,22,23,25,80,443,445,3389,5900,5901,137,161,3306,1433,5432,6379,27017,8080,8443,32400,5000,8123,8888,8006,8001,623"
+
+
+def scan_ports(ip: str) -> dict:
+    """Scan common ports + OS detection on a single IP."""
+    try:
+        result = subprocess.run(
+            ["nmap", "-T4", f"-p{COMMON_PORTS}", "-sV", "--version-intensity", "3",
+             "-O", "--osscan-limit", "--send-ip", "-oX", "-", ip],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode != 0:
+            result = subprocess.run(
+                ["nmap", "-T4", f"-p{COMMON_PORTS}", "-sV", "--version-intensity", "3",
+                 "-O", "--osscan-limit", "-oX", "-", ip],
+                capture_output=True, text=True, timeout=60
+            )
+        data = _parse_nmap_ports_xml(result.stdout)
+        return data.get(ip, {"open_ports": [], "os_guess": "Unknown"})
+    except FileNotFoundError:
+        return {"error": "nmap not found"}
+    except subprocess.TimeoutExpired:
+        return {"error": "scan timed out"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def _parse_nmap_xml(xml_output: str) -> list[dict]:
