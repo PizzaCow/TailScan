@@ -23,6 +23,8 @@ services:
     image: postgres:16-alpine
     container_name: guac-postgres
     restart: unless-stopped
+    networks:
+      - guac-net
     environment:
       POSTGRES_DB: guacamole_db
       POSTGRES_USER: guacamole
@@ -35,6 +37,8 @@ services:
     image: guacamole/guacamole:latest
     container_name: guacamole
     restart: unless-stopped
+    networks:
+      - guac-net
     depends_on:
       - guacd
       - postgres
@@ -51,3 +55,6 @@ services:
 volumes:
   tailscan-cache:
   guac-pgdata:
+
+networks:
+  guac-net:
