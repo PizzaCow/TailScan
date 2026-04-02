@@ -4,7 +4,9 @@ import subprocess
 import re
 import httpx
 import time
+import json
 import xml.etree.ElementTree as ET
+from typing import Generator
 
 
 def get_wan_geo() -> dict:
@@ -97,13 +99,13 @@ def scan_lan(subnet: str) -> list[dict]:
     """Fast ping sweep only — discovers live hosts."""
     try:
         result = subprocess.run(
-            ["nmap", "-sn", "-T4", "--send-ip", "-oX", "-", subnet],
-            capture_output=True, text=True, timeout=60
+            ["nmap", "-sn", "-T5", "--send-ip", "-oX", "-", subnet],
+            capture_output=True, text=True, timeout=90
         )
         if result.returncode != 0:
             result = subprocess.run(
-                ["nmap", "-sn", "-T4", "-oX", "-", subnet],
-                capture_output=True, text=True, timeout=60
+                ["nmap", "-sn", "-T5", "-oX", "-", subnet],
+                capture_output=True, text=True, timeout=90
             )
         return _parse_nmap_xml(result.stdout)
     except FileNotFoundError:
@@ -112,6 +114,52 @@ def scan_lan(subnet: str) -> list[dict]:
         return [{"error": "scan timed out"}]
     except Exception as e:
         return [{"error": str(e)}]
+
+
+def scan_lan_stream(subnet: str) -> Generator[dict, None, None]:
+    """
+    Stream ping sweep results as devices are discovered.
+    Runs nmap with -oX to stderr-equiv, parses incrementally via --open/line buffering.
+    Strategy: run nmap with XML output, parse host blocks as they complete.
+    nmap writes each <host> block when done, so we buffer and emit per-host.
+    """
+    cmd = ["nmap", "-sn", "-T5", "--send-ip", "-oX", "-", subnet]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    except FileNotFoundError:
+        yield {"error": "nmap not found"}
+        return
+
+    buf = ""
+    in_host = False
+    host_buf = ""
+
+    try:
+        for line in proc.stdout:
+            buf += line
+            stripped = line.strip()
+
+            if "<host " in stripped or stripped == "<host>":
+                in_host = True
+                host_buf = line
+            elif in_host:
+                host_buf += line
+                if "</host>" in stripped:
+                    in_host = False
+                    # Parse this single host
+                    try:
+                        # Wrap in minimal XML to parse standalone
+                        snippet = f"<nmaprun>{host_buf}</nmaprun>"
+                        devices = _parse_nmap_xml(snippet)
+                        for d in devices:
+                            yield d
+                    except Exception:
+                        pass
+                    host_buf = ""
+    except Exception as e:
+        yield {"error": str(e)}
+    finally:
+        proc.wait()
 
 
 # Ports worth scanning: ssh, ftp, telnet, smtp, http, https, smb, rdp, vnc,
