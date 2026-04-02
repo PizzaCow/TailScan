@@ -100,7 +100,7 @@ def scan_lan(subnet: str) -> list[dict]:
     try:
         result = subprocess.run(
             ["nmap", "-sn", "-T5", "--min-parallelism", "100", "--max-parallelism", "256",
-             "--send-ip", "-oX", "-", subnet],
+             "-oX", "-", subnet],
             capture_output=True, text=True, timeout=60
         )
         return _parse_nmap_xml(result.stdout)
@@ -120,7 +120,7 @@ def scan_lan_stream(subnet: str) -> Generator[dict, None, None]:
     cmd = [
         "nmap", "-sn", "-T5",
         "--min-parallelism", "100", "--max-parallelism", "256",
-        "--send-ip", "-oX", "-", subnet
+        "-oX", "-", subnet
     ]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
