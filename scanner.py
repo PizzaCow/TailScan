@@ -225,7 +225,7 @@ PORT_NAMES = {
     1880:  "Node-RED",
     8123:  "Home Assistant",
     1400:  "Sonos",
-    9000:  "Portainer / Sonarr",
+    9000:  "Portainer",
     # --- Homelab web UIs ---
     5000:  "Synology DSM",
     5001:  "Synology DSM (HTTPS)",
@@ -306,8 +306,11 @@ def scan_ports(ip: str) -> dict:
         entry = data.get(ip, {"open_ports": [], "os_guess": ""})
         # Enrich port names from our lookup table
         for p in entry.get("open_ports", []):
-            if not p.get("service") or p["service"] == str(p["port"]):
-                p["service"] = PORT_NAMES.get(p["port"], f"port {p['port']}")
+            # Always prefer our curated names over nmap's generic guesses
+            if p["port"] in PORT_NAMES:
+                p["service"] = PORT_NAMES[p["port"]]
+            elif not p.get("service") or p["service"] == str(p["port"]):
+                p["service"] = f"port {p['port']}"
         return entry
     except FileNotFoundError:
         return {"error": "nmap not found"}
