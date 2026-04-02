@@ -18,6 +18,8 @@ import auth
 import tailscale
 import scanner
 import json
+import httpx
+import re
 
 log = logging.getLogger("tailscan")
 
@@ -158,6 +160,106 @@ def api_scan(request: Request):
 
     return StreamingResponse(generate(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ─── Proxy ──────────────────────────────────────────────────────────────────
+
+@app.get("/browse", response_class=HTMLResponse)
+def browse(request: Request, ip: str, port: int = 80):
+    """Wrapper page that loads the proxied LAN device in an iframe."""
+    if not get_session(request):
+        return RedirectResponse("/login")
+    scheme = "https" if port in (443, 8443, 8006) else "http"
+    proxy_root = f"/proxy/{scheme}/{ip}/{port}/"
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Browse {ip}:{port} — TailScan</title>
+  <style>
+    * {{ margin:0; padding:0; box-sizing:border-box; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background:#0f1117; color:#e2e8f0; display:flex; flex-direction:column; height:100vh; }}
+    .bar {{ display:flex; align-items:center; gap:12px; padding:0 16px; height:44px;
+            background:#1a1d27; border-bottom:1px solid #2d3148; flex-shrink:0; font-size:13px; }}
+    .bar a {{ color:#5b6ee8; text-decoration:none; }}
+    .bar a:hover {{ text-decoration:underline; }}
+    .bar .addr {{ font-family:monospace; color:#a5b4fc; }}
+    iframe {{ flex:1; border:none; width:100%; background:#fff; }}
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <a href="/">← TailScan</a>
+    <span style="color:#7c85a2;">|</span>
+    <span class="addr">{scheme}://{ip}:{port}</span>
+    <span style="color:#7c85a2;font-size:11px;">(proxied via exit node)</span>
+  </div>
+  <iframe src="{proxy_root}" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+</body>
+</html>""")
+
+
+@app.api_route("/proxy/{scheme}/{ip}/{port}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def proxy(request: Request, scheme: str, ip: str, port: int, path: str):
+    """Transparent HTTP proxy — runs on the server, so it reaches the LAN via the exit node."""
+    if not get_session(request):
+        raise HTTPException(401)
+    if scheme not in ("http", "https"):
+        raise HTTPException(400, "Invalid scheme")
+
+    target_url = f"{scheme}://{ip}:{port}/{path}"
+    if request.url.query:
+        target_url += f"?{request.url.query}"
+
+    headers = {k: v for k, v in request.headers.items()
+               if k.lower() not in ("host", "connection", "transfer-encoding")}
+    headers["host"] = f"{ip}:{port}"
+
+    body = await request.body()
+
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=15, follow_redirects=True) as client:
+            resp = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                content=body,
+            )
+    except httpx.ConnectError:
+        return HTMLResponse("<h3 style='font-family:sans-serif;padding:20px'>Could not connect to device</h3>", status_code=502)
+    except httpx.TimeoutException:
+        return HTMLResponse("<h3 style='font-family:sans-serif;padding:20px'>Connection timed out</h3>", status_code=504)
+
+    resp_headers = {k: v for k, v in resp.headers.items()
+                    if k.lower() not in ("content-encoding", "transfer-encoding",
+                                         "content-security-policy", "x-frame-options")}
+
+    content_type = resp.headers.get("content-type", "")
+    content = resp.content
+
+    # Rewrite absolute URLs in HTML so links stay proxied
+    if "text/html" in content_type:
+        proxy_base = f"/proxy/{scheme}/{ip}/{port}"
+        text = content.decode("utf-8", errors="replace")
+        # href="/foo" → href="/proxy/http/ip/port/foo"
+        text = re.sub(
+            r'(href|src|action)=["\']/((?!proxy/|/).*?)["\']',
+            lambda m: f'{m.group(1)}="{proxy_base}/{m.group(2)}"',
+            text
+        )
+        # absolute http://ip:port/path → proxied
+        text = re.sub(
+            rf'{scheme}://{re.escape(ip)}:{port}(/[^"\']*)?',
+            lambda m: f"{proxy_base}{m.group(1) or '/'}",
+            text
+        )
+        content = text.encode("utf-8")
+        resp_headers["content-type"] = "text/html; charset=utf-8"
+
+    resp_headers.pop("content-length", None)
+    return Response(content=content, status_code=resp.status_code,
+                    headers=resp_headers, media_type=content_type)
 
 
 if __name__ == "__main__":
