@@ -358,7 +358,7 @@ function renderScan(d) {
           ? `<div class="empty-state"><div class="icon">📭</div><p>No devices found on subnet ${escHtml(d.subnet || '')}</p></div>`
           : `<div class="table-wrap"><table>
               <thead><tr>
-                <th>IP</th><th>Hostname</th><th>Ping</th><th>MAC</th><th>Vendor</th><th>Status</th>
+                <th>IP</th><th>Hostname</th><th>Ping</th><th>MAC</th><th>Vendor</th><th>OS</th><th>Open Ports</th><th>Status</th>
               </tr></thead>
               <tbody>
                 ${devices.map(dev => `
@@ -368,6 +368,8 @@ function renderScan(d) {
                     <td class="ping">${dev.ping_ms != null ? dev.ping_ms + ' ms' : '—'}</td>
                     <td class="mac-cell">${escHtml(dev.mac)}</td>
                     <td style="color:var(--muted);font-size:12px;">${escHtml(dev.vendor)}</td>
+                    <td style="color:var(--muted);font-size:12px;">${escHtml(dev.os_guess || '—')}</td>
+                    <td style="font-size:11px;">${(dev.open_ports||[]).map(p=>`<span title="${escHtml(p.service)}" style="display:inline-block;background:var(--surface2);border-radius:3px;padding:1px 5px;margin:1px;cursor:default;">${p.port}</span>`).join('') || '—'}</td>
                     <td class="status-up">●&nbsp;up</td>
                   </tr>`).join('')}
               </tbody>
