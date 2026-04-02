@@ -219,6 +219,8 @@ PORT_NAMES = {
     111:   "NFS / RPC",
     2049:  "NFS",
     8200:  "Synology Video / Backup",
+    3923:  "Copyparty",
+    30266: "Copyparty",
     # --- IoT / home automation ---
     1883:  "MQTT",
     8883:  "MQTT (TLS)",
