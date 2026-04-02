@@ -110,10 +110,18 @@ def _smb_conn(host: str, username: str, password: str, port: int = 445):
         smbclient.delete_session(host, port=port)
     except Exception:
         pass
-    kwargs = {"port": port}
+    kwargs = {
+        "port": port,
+        "auth_protocol": "ntlm",   # force NTLM, avoid Kerberos/SPNEGO failures
+        "require_signing": False,   # many NAS/home devices don't enforce signing
+    }
     if username:
         kwargs["username"] = username
         kwargs["password"] = password or ""
+    else:
+        # Guest/anonymous — pass empty strings explicitly
+        kwargs["username"] = ""
+        kwargs["password"] = ""
     smbclient.register_session(host, **kwargs)
 
 
