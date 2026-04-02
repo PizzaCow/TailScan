@@ -1,0 +1,7 @@
+.env
+__pycache__
+*.pyc
+guacamole/initdb.sql
+guac-pgdata/
+tailscan-cache/
+.git
