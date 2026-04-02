@@ -122,7 +122,9 @@
   /* Hide empty rows (default on) — only after port scan has completed */
   tr.no-ports:not(.scanning) { display: none; }
   body.show-empty tr.no-ports { display: table-row; }
-  tr.cached-row td { opacity: 0.7; }
+  tr.cached-row td { color: #c4a7e7; }
+  tr.cached-row .port-chip { border-color: #c4a7e7; color: #c4a7e7; }
+  tr.cached-row a.port-chip { color: #c4a7e7; }
 
   /* Port chips */
   .port-chips { display: flex; flex-wrap: wrap; gap: 4px; }
