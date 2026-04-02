@@ -79,6 +79,16 @@ def api_peers(request: Request):
     return {"peers": peers, "current_exit_node": current_exit}
 
 
+@app.get("/api/port-scan")
+def api_port_scan(request: Request, ip: str):
+    if not get_session(request):
+        raise HTTPException(401)
+    log.info(f"Port scanning {ip}")
+    result = scanner.scan_ports(ip)
+    log.info(f"Port scan {ip}: {len(result.get('open_ports', []))} ports, OS: {result.get('os_guess')}")
+    return result
+
+
 @app.post("/api/exit-node/set")
 async def api_set_exit_node(request: Request):
     if not get_session(request):
