@@ -290,95 +290,123 @@ async function disconnectExit() {
 
 // ── Scan ─────────────────────────────────────────────────────────────────────
 
-async function runScan() {
+let activeScanSource = null;
+
+function runScan() {
+  // Close any existing stream
+  if (activeScanSource) { activeScanSource.close(); activeScanSource = null; }
+  stopAutoRefresh();
+
   const main = document.getElementById('main-content');
   main.innerHTML = `
-    <div style="text-align:center;padding:60px;color:var(--muted)">
-      <div class="spinner" style="width:32px;height:32px;margin:0 auto 16px"></div>
-      <p>Scanning LAN...</p>
-    </div>`;
-
-  try {
-    const r = await fetch('/api/scan');
-    const d = await r.json();
-    renderScan(d);
-    resetCountdown();
-  } catch(e) {
-    showError('Scan failed.');
-  }
-}
-
-function renderScan(d) {
-  const main = document.getElementById('main-content');
-  // Don't reset UI to "not connected" just because scan says so — trust sidebar state
-  if (!d.connected && !currentExitNode) {
-    main.innerHTML = `
-      <div id="no-exit-msg">
-        <div style="font-size:56px;">🛰️</div>
-        <h2>Not Connected</h2>
-        <p>Select an exit node from the sidebar.</p>
-      </div>`;
-    return;
-  }
-  // If we think we're connected but scan disagrees, keep showing results anyway
-  if (!d.connected) d.connected = true;
-
-  const geo = d.geo || {};
-  const devices = d.devices || [];
-  const hasError = devices.length === 1 && devices[0].error;
-
-  main.innerHTML = `
-    <!-- Refresh bar -->
-    <div class="refresh-bar">
-      <span>Auto-refresh in <span class="countdown" id="countdown">30</span>s</span>
-      <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Scan now</button>
-    </div>
-
-    <!-- WAN / Geo -->
-    <div class="card">
-      <div class="card-title">WAN & Location</div>
-      <div class="geo-grid">
-        <div class="geo-item"><label>WAN IP</label><div class="value ip">${escHtml(geo.ip || '—')}</div></div>
-        <div class="geo-item"><label>City</label><div class="value">${escHtml(geo.city || '—')}</div></div>
-        <div class="geo-item"><label>Region</label><div class="value">${escHtml(geo.region || '—')}</div></div>
-        <div class="geo-item"><label>Country</label><div class="value">${escHtml(geo.country || '—')}</div></div>
-        <div class="geo-item"><label>Latitude</label><div class="value">${geo.lat ?? '—'}</div></div>
-        <div class="geo-item"><label>Longitude</label><div class="value">${geo.lon ?? '—'}</div></div>
-        <div class="geo-item"><label>ISP</label><div class="value">${escHtml(geo.isp || '—')}</div></div>
-        <div class="geo-item"><label>Timezone</label><div class="value">${escHtml(geo.timezone || '—')}</div></div>
+    <div id="scan-wrap">
+      <div class="refresh-bar" style="margin-bottom:12px;">
+        <div class="spinner"></div>
+        <span id="scan-status">Connecting...</span>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Restart</button>
       </div>
-    </div>
-
-    <!-- LAN devices -->
-    <div class="card">
-      <div class="card-title">LAN Devices — ${escHtml(d.subnet || 'subnet unknown')} (${devices.length} found)</div>
-      ${hasError
-        ? `<div style="color:var(--red);font-size:13px;">${escHtml(devices[0].error)}</div>`
-        : devices.length === 0
-          ? `<div class="empty-state"><div class="icon">📭</div><p>No devices found on subnet ${escHtml(d.subnet || '')}</p></div>`
-          : `<div class="table-wrap"><table>
-              <thead><tr>
-                <th>IP</th><th>Hostname</th><th>Ping</th><th>MAC</th><th>Vendor</th><th>Status</th><th></th>
-              </tr></thead>
-              <tbody>
-                ${devices.map(dev => `
-                  <tr id="row-${dev.ip.replace(/\./g,'-')}">
-                    <td class="ip-cell">${escHtml(dev.ip)}</td>
-                    <td>${escHtml(dev.hostname)}</td>
-                    <td class="ping">${dev.ping_ms != null ? dev.ping_ms + ' ms' : '—'}</td>
-                    <td class="mac-cell">${escHtml(dev.mac)}</td>
-                    <td style="color:var(--muted);font-size:12px;">${escHtml(dev.vendor)}</td>
-                    <td class="status-up">●&nbsp;up</td>
-                    <td><button class="btn btn-ghost" style="padding:3px 10px;font-size:11px;" onclick="portScan('${dev.ip}')">Scan Ports</button></td>
-                  </tr>
-                  <tr id="ports-${dev.ip.replace(/\./g,'-')}" style="display:none">
-                    <td colspan="7" style="padding:0 12px 12px 12px;"></td>
-                  </tr>`).join('')}
-              </tbody>
-            </table></div>`
-      }
+      <div id="geo-card"></div>
+      <div id="device-card" class="card" style="display:none">
+        <div class="card-title" id="device-card-title">LAN Devices</div>
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>IP</th><th>Hostname</th><th>Ping</th><th>MAC</th><th>Vendor</th><th>Status</th><th></th>
+          </tr></thead>
+          <tbody id="device-tbody"></tbody>
+        </table></div>
+      </div>
     </div>`;
+
+  let deviceCount = 0;
+  const src = new EventSource('/api/scan');
+  activeScanSource = src;
+
+  src.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+
+    if (d.type === 'meta') {
+      if (!d.connected) {
+        main.innerHTML = `<div id="no-exit-msg"><div style="font-size:56px;">🛰️</div><h2>Not Connected</h2><p>Select an exit node from the sidebar.</p></div>`;
+        src.close(); return;
+      }
+      // Render geo card
+      const geo = d.geo || {};
+      document.getElementById('geo-card').innerHTML = `
+        <div class="card" style="margin-bottom:20px;">
+          <div class="card-title">WAN & Location</div>
+          <div class="geo-grid">
+            <div class="geo-item"><label>WAN IP</label><div class="value ip">${escHtml(geo.ip||'—')}</div></div>
+            <div class="geo-item"><label>City</label><div class="value">${escHtml(geo.city||'—')}</div></div>
+            <div class="geo-item"><label>Region</label><div class="value">${escHtml(geo.region||'—')}</div></div>
+            <div class="geo-item"><label>Country</label><div class="value">${escHtml(geo.country||'—')}</div></div>
+            <div class="geo-item"><label>ISP</label><div class="value">${escHtml(geo.isp||'—')}</div></div>
+            <div class="geo-item"><label>Timezone</label><div class="value">${escHtml(geo.timezone||'—')}</div></div>
+          </div>
+        </div>`;
+      document.getElementById('scan-status').textContent = `Scanning ${d.subnet}...`;
+      document.getElementById('device-card').style.display = '';
+      document.getElementById('device-card-title').textContent = `LAN Devices — ${d.subnet} (scanning...)`;
+    }
+
+    else if (d.type === 'device') {
+      deviceCount++;
+      const tbody = document.getElementById('device-tbody');
+      const key = d.ip.replace(/\./g, '-');
+      const row = document.createElement('tr');
+      row.id = `row-${key}`;
+      row.innerHTML = `
+        <td class="ip-cell">${escHtml(d.ip)}</td>
+        <td>${escHtml(d.hostname)}</td>
+        <td class="ping">${d.ping_ms != null ? d.ping_ms + ' ms' : '—'}</td>
+        <td class="mac-cell">${escHtml(d.mac)}</td>
+        <td style="color:var(--muted);font-size:12px;">${escHtml(d.vendor)}</td>
+        <td class="status-up">●&nbsp;up</td>
+        <td><button class="btn btn-ghost" style="padding:3px 10px;font-size:11px;" onclick="portScan('${d.ip}')">Scan Ports</button></td>`;
+      tbody.appendChild(row);
+      // Expandable ports row
+      const portRow = document.createElement('tr');
+      portRow.id = `ports-${key}`;
+      portRow.style.display = 'none';
+      portRow.innerHTML = '<td colspan="7" style="padding:0 12px 12px 12px;"></td>';
+      tbody.appendChild(portRow);
+      // Update title
+      const title = document.getElementById('device-card-title');
+      if (title) title.textContent = `LAN Devices — scanning... (${deviceCount} found)`;
+    }
+
+    else if (d.type === 'error') {
+      const status = document.getElementById('scan-status');
+      if (status) status.innerHTML = `<span style="color:var(--red)">⚠ ${escHtml(d.message)}</span>`;
+      src.close();
+    }
+
+    else if (d.type === 'done') {
+      src.close();
+      activeScanSource = null;
+      const status = document.getElementById('scan-status');
+      if (status) status.parentElement.innerHTML = `
+        <div class="refresh-bar">
+          <span style="color:var(--green);">✓ Scan complete</span>
+          <span style="color:var(--muted);margin-left:8px;">Next in <span class="countdown" id="countdown">30</span>s</span>
+          <span style="flex:1"></span>
+          <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Scan now</button>
+        </div>`;
+      const title = document.getElementById('device-card-title');
+      if (title) title.textContent = `LAN Devices — ${d.count} found`;
+      resetCountdown();
+    }
+  };
+
+  src.onerror = () => {
+    src.close();
+    activeScanSource = null;
+    const status = document.getElementById('scan-status');
+    if (status) status.innerHTML = `<span style="color:var(--red)">Connection lost</span>`;
+  };
 }
+
+
 
 // ── Port scan ────────────────────────────────────────────────────────────────
 
