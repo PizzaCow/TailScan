@@ -554,7 +554,13 @@ async function portScan(ip) {
         const row = document.getElementById(`row-${key}`);
         if (row) row.classList.remove('no-ports');
         const chips = ports.map(p => {
-          const browsable = [80, 443, 8080, 8443, 8006, 8123, 8888, 5000, 8001, 32400, 10000, 9090, 3000].includes(p.port);
+          const browsable = [
+            80, 443, 8080, 8081, 8082, 8090, 8443, 8006, 8007,
+            8123, 8888, 5000, 5001, 8001, 32400, 10000, 9090, 9091,
+            3000, 3001, 4000, 4200, 7000, 7001, 8096, 8097, 8920,
+            7878, 8989, 8686, 9696, 8787, 5055, 5299, 9117, 9443,
+            1880, 9000, 9393, 9999, 4040, 8200, 9090
+          ].includes(p.port);
           const tip = browsable
             ? `${escHtml(p.service)} — click to browse`
             : escHtml(p.service);
