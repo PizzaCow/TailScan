@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TailScan</title>
 <style>
+  /* ── Default theme: Dark Slate ─────────────────────────────── */
   :root {
     --bg: #0f1117;
     --surface: #1a1d27;
@@ -18,6 +19,24 @@
     --red: #ef4444;
     --yellow: #f59e0b;
     --exit-badge: #7c3aed;
+    --guac-green: #22c55e;
+  }
+
+  /* ── Rose Pine theme ────────────────────────────────────────── */
+  body.theme-rosepine {
+    --bg: #191724;
+    --surface: #1f1d2e;
+    --surface2: #26233a;
+    --border: #403d52;
+    --text: #e0def4;
+    --muted: #6e6a86;
+    --accent: #c4a7e7;
+    --accent-hover: #ebbcba;
+    --green: #9ccfd8;
+    --red: #eb6f92;
+    --yellow: #f6c177;
+    --exit-badge: #c4a7e7;
+    --guac-green: #9ccfd8;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
@@ -29,7 +48,8 @@
     background: var(--surface); border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
-  .topbar .logo { font-weight: 700; font-size: 16px; color: var(--accent); letter-spacing: 0.5px; }
+  .topbar .logo { font-weight: 700; font-size: 16px; color: var(--accent); letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: opacity 0.15s; }
+  .topbar .logo:hover { opacity: 0.75; }
   .topbar .spacer { flex: 1; }
   .topbar .exit-status {
     display: flex; align-items: center; gap: 8px;
@@ -140,6 +160,17 @@
   .port-chip:hover { background: rgba(91,110,232,0.35); border-color: rgba(91,110,232,0.5); color: #c7d2fe; }
   .port-chip.no-browse { cursor: default; }
   .port-chip.no-browse:hover { background: rgba(91,110,232,0.15); border-color: rgba(91,110,232,0.25); color: #a5b4fc; }
+  /* Guacamole-connectable ports */
+  .port-chip.guac-chip {
+    background: rgba(34,197,94,0.12); color: #4ade80;
+    border: 1px solid rgba(34,197,94,0.3);
+  }
+  .port-chip.guac-chip:hover { background: rgba(34,197,94,0.28); border-color: rgba(34,197,94,0.55); color: #86efac; }
+  body.theme-rosepine .port-chip.guac-chip {
+    background: rgba(156,207,216,0.12); color: #9ccfd8;
+    border: 1px solid rgba(156,207,216,0.3);
+  }
+  body.theme-rosepine .port-chip.guac-chip:hover { background: rgba(156,207,216,0.28); border-color: rgba(156,207,216,0.55); color: #c8e8ec; }
 
   /* Custom tooltip */
   .port-chip .chip-tip {
@@ -199,7 +230,7 @@
 
 <!-- Top bar -->
 <div class="topbar">
-  <span class="logo">🔍 TailScan</span>
+  <span class="logo" onclick="cycleTheme()" title="Click to change theme">🔍 TailScan</span>
   <div class="exit-status">
     <div class="dot" id="exit-dot"></div>
     <span id="exit-label">Not connected to exit node</span>
@@ -561,22 +592,42 @@ function renderPortsFromCache(ip, open_ports) {
   }
 }
 
+const BROWSABLE_PORTS = new Set([
+  80, 443, 8080, 8081, 8082, 8090, 8443, 8006, 8007,
+  8123, 8888, 5000, 5001, 8001, 32400, 10000, 9090, 9091,
+  3000, 3001, 4000, 4200, 7000, 7001, 8096, 8097, 8920,
+  7878, 8989, 8686, 9696, 8787, 5055, 5299, 9117, 9443,
+  1880, 9000, 9393, 9999, 4040, 8200
+]);
+
+// Ports that open in Guacamole (green chips) — populated once Guacamole is configured
+const GUAC_PORTS = new Set([22, 3389, 5900, 5901, 5902, 5903]);
+const GUAC_PROTOCOLS = {22: 'ssh', 3389: 'rdp', 5900: 'vnc', 5901: 'vnc', 5902: 'vnc', 5903: 'vnc'};
+// Set this to your Guacamole URL once deployed, e.g. 'http://100.97.92.103:8080/guacamole'
+const GUAC_URL = null;  // null = show green but no link yet
+
 function buildChips(ip, ports) {
   return ports.map(p => {
-    const browsable = [
-      80, 443, 8080, 8081, 8082, 8090, 8443, 8006, 8007,
-      8123, 8888, 5000, 5001, 8001, 32400, 10000, 9090, 9091,
-      3000, 3001, 4000, 4200, 7000, 7001, 8096, 8097, 8920,
-      7878, 8989, 8686, 9696, 8787, 5055, 5299, 9117, 9443,
-      1880, 9000, 9393, 9999, 4040, 8200
-    ].includes(p.port);
-    const tip = browsable ? `${escHtml(p.service)} — click to browse` : escHtml(p.service);
-    const scheme = [443, 8443, 8006].includes(p.port) ? 'https' : 'http';
-    const tUrl = encodeURIComponent(`${scheme}://${ip}:${p.port}/`);
-    if (browsable) {
+    const isGuac = GUAC_PORTS.has(p.port);
+    const isBrowsable = BROWSABLE_PORTS.has(p.port);
+
+    if (isGuac) {
+      const proto = GUAC_PROTOCOLS[p.port];
+      const tip = `${escHtml(p.service)} — open in Guacamole (${proto.toUpperCase()})`;
+      if (GUAC_URL) {
+        const params = new URLSearchParams({scheme: proto, hostname: ip, port: p.port});
+        const href = `${GUAC_URL}/#/client/${btoa('#' + proto + '\0c\0' + 'default')}`;
+        return `<a class="port-chip guac-chip" href="${href}" target="_blank">${p.port}<span class="chip-tip">${tip}</span></a>`;
+      } else {
+        return `<span class="port-chip guac-chip" title="${tip}">${p.port}<span class="chip-tip">${tip}</span></span>`;
+      }
+    } else if (isBrowsable) {
+      const scheme = [443, 8443, 8006].includes(p.port) ? 'https' : 'http';
+      const tUrl = encodeURIComponent(`${scheme}://${ip}:${p.port}/`);
+      const tip = `${escHtml(p.service)} — click to browse`;
       return `<a class="port-chip" href="/proxy?t=${tUrl}" target="_blank">${p.port}<span class="chip-tip">${tip}</span></a>`;
     } else {
-      return `<span class="port-chip no-browse">${p.port}<span class="chip-tip">${tip}</span></span>`;
+      return `<span class="port-chip no-browse">${p.port}<span class="chip-tip">${escHtml(p.service)}</span></span>`;
     }
   }).join('');
 }
@@ -740,6 +791,40 @@ function showError(msg) {
       <p>${escHtml(msg)}</p>
     </div>`;
 }
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+
+const THEMES = ['default', 'rosepine'];
+const THEME_LABELS = {default: 'Dark Slate', rosepine: 'Rosé Pine'};
+
+function applyTheme(name) {
+  document.body.classList.remove(...THEMES.map(t => `theme-${t}`));
+  if (name !== 'default') document.body.classList.add(`theme-${name}`);
+  localStorage.setItem('tailscan-theme', name);
+  // Update version badge subtitle
+  const vbadge = document.getElementById('version-badge');
+  if (vbadge) {
+    const span = document.getElementById('version-str');
+    const cur = span ? span.textContent : '';
+    vbadge.title = `Theme: ${THEME_LABELS[name] || name}`;
+  }
+}
+
+function cycleTheme() {
+  const cur = localStorage.getItem('tailscan-theme') || 'default';
+  const idx = THEMES.indexOf(cur);
+  const next = THEMES[(idx + 1) % THEMES.length];
+  applyTheme(next);
+  // Brief flash on logo to confirm
+  const logo = document.querySelector('.logo');
+  if (logo) {
+    logo.style.opacity = '0.3';
+    setTimeout(() => logo.style.opacity = '', 150);
+  }
+}
+
+// Apply saved theme on load
+applyTheme(localStorage.getItem('tailscan-theme') || 'default');
 
 // ── Version ───────────────────────────────────────────────────────────────────
 
