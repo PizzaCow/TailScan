@@ -154,28 +154,40 @@ def scan_lan_stream(subnet: str) -> Generator[dict, None, None]:
         proc.wait()
 
 
-# Ports worth scanning: ssh, ftp, telnet, smtp, http, https, smb, rdp, vnc,
-# netbios, snmp, mysql, mssql, postgres, redis, mongodb, http-alt, plex,
-# homeassistant, synology dsm, unifi, proxmox, esxi, ipmi
-COMMON_PORTS = "21,22,23,25,80,443,445,3389,5900,5901,137,161,3306,1433,5432,6379,27017,8080,8443,32400,5000,8123,8888,8006,8001,623"
+
+PORT_NAMES = {
+    21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS",
+    80: "HTTP", 110: "POP3", 137: "NetBIOS", 139: "NetBIOS-SSN",
+    143: "IMAP", 161: "SNMP", 389: "LDAP", 443: "HTTPS",
+    445: "SMB", 548: "AFP", 554: "RTSP", 623: "IPMI",
+    631: "IPP (Print)", 993: "IMAPS", 995: "POP3S",
+    1433: "MSSQL", 1883: "MQTT", 3306: "MySQL",
+    3389: "RDP", 5000: "Synology DSM / UPnP", 5432: "PostgreSQL",
+    5900: "VNC", 5901: "VNC-1", 6379: "Redis",
+    8006: "Proxmox", 8080: "HTTP-alt", 8123: "Home Assistant",
+    8443: "HTTPS-alt", 8888: "Jupyter / HTTP-alt",
+    9090: "Prometheus", 9100: "Node Exporter",
+    10000: "Webmin", 27017: "MongoDB", 32400: "Plex",
+    51413: "Transmission",
+}
+
+COMMON_PORTS = ",".join(str(p) for p in sorted(PORT_NAMES.keys()))
 
 
 def scan_ports(ip: str) -> dict:
-    """Scan common ports + OS detection on a single IP."""
+    """Fast TCP connect scan — no service probing, ~1s per host."""
     try:
         result = subprocess.run(
-            ["nmap", "-T4", f"-p{COMMON_PORTS}", "-sV", "--version-intensity", "3",
-             "-O", "--osscan-limit", "--send-ip", "-oX", "-", ip],
-            capture_output=True, text=True, timeout=60
+            ["nmap", "-T5", f"-p{COMMON_PORTS}", "--open", "-oX", "-", ip],
+            capture_output=True, text=True, timeout=30
         )
-        if result.returncode != 0:
-            result = subprocess.run(
-                ["nmap", "-T4", f"-p{COMMON_PORTS}", "-sV", "--version-intensity", "3",
-                 "-O", "--osscan-limit", "-oX", "-", ip],
-                capture_output=True, text=True, timeout=60
-            )
         data = _parse_nmap_ports_xml(result.stdout)
-        return data.get(ip, {"open_ports": [], "os_guess": "Unknown"})
+        entry = data.get(ip, {"open_ports": [], "os_guess": ""})
+        # Enrich port names from our lookup table
+        for p in entry.get("open_ports", []):
+            if not p.get("service") or p["service"] == str(p["port"]):
+                p["service"] = PORT_NAMES.get(p["port"], f"port {p['port']}")
+        return entry
     except FileNotFoundError:
         return {"error": "nmap not found"}
     except subprocess.TimeoutExpired:
