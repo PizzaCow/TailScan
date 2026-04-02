@@ -903,11 +903,23 @@ async def _elf_ls(proto, host, port, share, path, user, password):
 
 async def _elf_open(proto, host, port, share, path, user, password):
     """Return (entries, cwd_entry) for a directory."""
-    cwd_entry = _elf_entry(proto, host, port, share, path, path.rstrip("/").split("/")[-1] or "root", True)
-    if path == "/" and not share:
+    if path == "/":
         cwd_entry = _elf_root_entry(proto, host, port, share)
-    elif path == "/":
-        cwd_entry = _elf_root_entry(proto, host, port, share)
+    else:
+        name = path.rstrip("/").split("/")[-1] or "root"
+        cwd_entry = _elf_entry(proto, host, port, share, path, name, True)
+        # Non-root dirs also need options for elFinder to display contents
+        cwd_entry["options"] = {
+            "path": path,
+            "url": "",
+            "tmbUrl": "",
+            "separator": "/",
+            "copyOverwrite": 1,
+            "uploadOverwrite": 1,
+            "uploadMaxSize": 0,
+            "disabled": [],
+            "archivers": {"create": [], "extract": []},
+        }
 
     entries = await _asyncio.get_event_loop().run_in_executor(
         None, lambda: _elf_ls_sync(proto, host, port, share, path, user, password)
@@ -974,10 +986,29 @@ async def elfinder_connector(request: Request):
         except Exception as e:
             return err(str(e))
 
-        resp = {"cwd": cwd, "files": [cwd] + files, "api": "2.1", "uplMaxSize": "256M", "uplMaxFile": 20}
+        # Always include options — elFinder needs them on every open to
+        # correctly assign files to the right volume/pane
+        vol_options = {
+            "path": path,
+            "url": "",
+            "tmbUrl": "",
+            "separator": "/",
+            "copyOverwrite": 1,
+            "uploadOverwrite": 1,
+            "uploadMaxSize": 0,
+            "disabled": [],
+            "archivers": {"create": [], "extract": []},
+        }
+        resp = {
+            "cwd": cwd,
+            "files": [cwd] + files,
+            "api": "2.1",
+            "uplMaxSize": "256M",
+            "uplMaxFile": 20,
+            "options": vol_options,
+        }
         if init:
             resp["init"] = 1
-            resp["options"] = cwd.get("options", {})
         return JSONResponse(resp)
 
     # ── ls ────────────────────────────────────────────────────────────────────
