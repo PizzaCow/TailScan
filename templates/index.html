@@ -442,7 +442,11 @@ function runScan() {
         }
         if (!inserted) tbody.appendChild(row);
       }
-      // (don't touch existing rows on refresh — port data stays)
+      // Queue port scan immediately for new IPs (or re-queue on refresh if showing spinner)
+      if (isNew) {
+        portScanQueue.push(d.ip);
+        drainPortScanQueue();
+      }
 
       const title = document.getElementById('device-card-title');
       if (title) title.textContent =
@@ -478,17 +482,6 @@ function runScan() {
       if (title) title.textContent = `LAN Devices — ${d.count} found`;
 
       resetCountdown();
-
-      // Auto port scan: queue IPs showing "queued" spinner (not yet scanned)
-      const newIPs = [...seenIPs].filter(ip => {
-        const key = ip.replace(/\./g, '-');
-        const cell = document.getElementById(`ports-inline-${key}`);
-        return cell && cell.querySelector('.ports-scanning');
-      });
-      if (newIPs.length) {
-        portScanQueue.push(...newIPs);
-        drainPortScanQueue();
-      }
 
       // Schedule silent port rescan of all known devices in 300s
       schedulePortRescan();
