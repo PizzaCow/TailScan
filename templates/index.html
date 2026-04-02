@@ -119,6 +119,9 @@
   .status-up { color: var(--green); font-weight: 600; }
   .ip-cell { font-family: monospace; color: var(--accent); white-space: nowrap; }
 
+  /* Hide empty rows */
+  body.hide-empty tr.no-ports { display: none; }
+
   /* Port chips */
   .port-chips { display: flex; flex-wrap: wrap; gap: 4px; }
   .port-chip {
@@ -199,6 +202,7 @@
   </div>
   <div class="spacer"></div>
   <button class="btn btn-danger" id="disconnect-btn" style="display:none" onclick="disconnectExit()">Disconnect</button>
+  <button class="btn btn-ghost" id="toggle-empty-btn" onclick="toggleEmpty()" style="display:none">Hide empty</button>
   <a href="/logout"><button class="btn btn-ghost">Logout</button></a>
 </div>
 
@@ -544,7 +548,12 @@ async function portScan(ip) {
       const ports = d.open_ports || [];
       if (ports.length === 0) {
         cell.innerHTML = `<span style="color:var(--muted);font-size:11px;">—</span>`;
+        const row = document.getElementById(`row-${key}`);
+        if (row) row.classList.add('no-ports');
+        document.getElementById('toggle-empty-btn').style.display = '';
       } else {
+        const row = document.getElementById(`row-${key}`);
+        if (row) row.classList.remove('no-ports');
         const chips = ports.map(p => {
           const browsable = [80, 443, 8080, 8443, 8006, 8123, 8888, 5000, 8001, 32400, 10000, 9090, 3000].includes(p.port);
           const tip = browsable
@@ -566,6 +575,13 @@ async function portScan(ip) {
   } catch(e) {
     cell.innerHTML = `<span style="color:var(--red);font-size:11px;">failed</span>`;
   }
+}
+
+// ── Toggle empty rows ────────────────────────────────────────────────────────
+
+function toggleEmpty() {
+  const hiding = document.body.classList.toggle('hide-empty');
+  document.getElementById('toggle-empty-btn').textContent = hiding ? 'Show all' : 'Hide empty';
 }
 
 // ── Auto-refresh ─────────────────────────────────────────────────────────────
