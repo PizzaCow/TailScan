@@ -986,6 +986,19 @@ async def elfinder_connector(request: Request):
         except Exception as e:
             return err(str(e))
 
+        # Build ancestor entries so the tree sidebar stays populated.
+        # elFinder removes tree nodes for any dir not present in the files array.
+        ancestors = []
+        if path != "/":
+            parts = path.strip("/").split("/")
+            for i in range(len(parts)):
+                anc_path = "/" + "/".join(parts[:i+1])
+                if anc_path == path:
+                    continue  # already in files as cwd
+                anc_name = parts[i]
+                ancestors.append(_elf_entry(proto, host, port, share,
+                                            anc_path, anc_name, True))
+
         # Always include options — elFinder needs them on every open to
         # correctly assign files to the right volume/pane
         vol_options = {
@@ -1001,7 +1014,7 @@ async def elfinder_connector(request: Request):
         }
         resp = {
             "cwd": cwd,
-            "files": [cwd] + files,
+            "files": ancestors + [cwd] + files,
             "api": "2.1",
             "uplMaxSize": "256M",
             "uplMaxFile": 20,
