@@ -160,7 +160,7 @@
   .port-chip:hover { background: rgba(91,110,232,0.35); border-color: rgba(91,110,232,0.5); color: #c7d2fe; }
   .port-chip.no-browse { cursor: default; }
   .port-chip.no-browse:hover { background: rgba(91,110,232,0.15); border-color: rgba(91,110,232,0.25); color: #a5b4fc; }
-  /* Guacamole-connectable ports */
+  /* Guacamole-connectable ports (green) */
   .port-chip.guac-chip {
     background: rgba(34,197,94,0.12); color: #4ade80;
     border: 1px solid rgba(34,197,94,0.3);
@@ -171,6 +171,18 @@
     border: 1px solid rgba(156,207,216,0.3);
   }
   body.theme-rosepine .port-chip.guac-chip:hover { background: rgba(156,207,216,0.28); border-color: rgba(156,207,216,0.55); color: #c8e8ec; }
+
+  /* Copyparty / file transfer ports (orange) */
+  .port-chip.copyparty-chip {
+    background: rgba(249,115,22,0.13); color: #fb923c;
+    border: 1px solid rgba(249,115,22,0.3);
+  }
+  .port-chip.copyparty-chip:hover { background: rgba(249,115,22,0.28); border-color: rgba(249,115,22,0.55); color: #fdba74; }
+  body.theme-rosepine .port-chip.copyparty-chip {
+    background: rgba(246,193,119,0.13); color: #f6c177;
+    border: 1px solid rgba(246,193,119,0.3);
+  }
+  body.theme-rosepine .port-chip.copyparty-chip:hover { background: rgba(246,193,119,0.28); border-color: rgba(246,193,119,0.55); color: #f9d89a; }
 
   /* Custom tooltip */
   .port-chip .chip-tip {
@@ -600,32 +612,56 @@ const BROWSABLE_PORTS = new Set([
   1880, 9000, 9393, 9999, 4040, 8200
 ]);
 
-// Ports that open in Guacamole (green chips) — populated once Guacamole is configured
+// Copyparty file server ports (orange + browsable)
+const COPYPARTY_PORTS = new Set([3923, 30266]);
+
+// File transfer protocol ports — shown in orange (not web-browsable)
+const FILE_PROTO_PORTS = new Set([21, 873, 2049, 445, 548]);
+const FILE_PROTO_LABELS = {
+  21: 'FTP', 873: 'rsync', 2049: 'NFS', 445: 'SMB', 548: 'AFP'
+};
+
+// Ports that open in Guacamole (green chips)
 const GUAC_PORTS = new Set([22, 3389, 5900, 5901, 5902, 5903]);
 const GUAC_PROTOCOLS = {22: 'ssh', 3389: 'rdp', 5900: 'vnc', 5901: 'vnc', 5902: 'vnc', 5903: 'vnc'};
-// Set this to your Guacamole URL once deployed, e.g. 'http://100.97.92.103:8080/guacamole'
-const GUAC_URL = null;  // null = show green but no link yet
+// Set this to your Guacamole URL once deployed, e.g. 'http://100.97.92.103:9090/guacamole'
+const GUAC_URL = null;  // null = show green chip but no link yet
 
 function buildChips(ip, ports) {
   return ports.map(p => {
     const isGuac = GUAC_PORTS.has(p.port);
+    const isCopyparty = COPYPARTY_PORTS.has(p.port);
+    const isFileProt = FILE_PROTO_PORTS.has(p.port);
     const isBrowsable = BROWSABLE_PORTS.has(p.port);
 
     if (isGuac) {
       const proto = GUAC_PROTOCOLS[p.port];
-      const tip = `${escHtml(p.service)} — open in Guacamole (${proto.toUpperCase()})`;
+      const tip = GUAC_URL
+        ? `${escHtml(p.service)} — open in Guacamole (${proto.toUpperCase()})`
+        : `${escHtml(p.service)} — Guacamole not deployed yet`;
       if (GUAC_URL) {
-        const params = new URLSearchParams({scheme: proto, hostname: ip, port: p.port});
         const href = `${GUAC_URL}/#/client/${btoa('#' + proto + '\0c\0' + 'default')}`;
         return `<a class="port-chip guac-chip" href="${href}" target="_blank">${p.port}<span class="chip-tip">${tip}</span></a>`;
       } else {
-        return `<span class="port-chip guac-chip" title="${tip}">${p.port}<span class="chip-tip">${tip}</span></span>`;
+        return `<span class="port-chip guac-chip no-browse">${p.port}<span class="chip-tip">${tip}</span></span>`;
       }
+
+    } else if (isCopyparty) {
+      const tUrl = encodeURIComponent(`http://${ip}:${p.port}/`);
+      const tip = `Copyparty file server — click to browse`;
+      return `<a class="port-chip copyparty-chip" href="/proxy?t=${tUrl}" target="_blank">${p.port}<span class="chip-tip">${tip}</span></a>`;
+
+    } else if (isFileProt) {
+      const label = FILE_PROTO_LABELS[p.port] || escHtml(p.service);
+      const tip = `${label} — file transfer protocol`;
+      return `<span class="port-chip copyparty-chip no-browse">${p.port}<span class="chip-tip">${tip}</span></span>`;
+
     } else if (isBrowsable) {
       const scheme = [443, 8443, 8006].includes(p.port) ? 'https' : 'http';
       const tUrl = encodeURIComponent(`${scheme}://${ip}:${p.port}/`);
       const tip = `${escHtml(p.service)} — click to browse`;
       return `<a class="port-chip" href="/proxy?t=${tUrl}" target="_blank">${p.port}<span class="chip-tip">${tip}</span></a>`;
+
     } else {
       return `<span class="port-chip no-browse">${p.port}<span class="chip-tip">${escHtml(p.service)}</span></span>`;
     }
