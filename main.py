@@ -519,7 +519,7 @@ def api_version():
 
 # ─── Guacamole integration ──────────────────────────────────────────────────
 
-GUAC_BASE = os.getenv("GUAC_URL", "http://localhost:8085/guacamole")
+GUAC_BASE = os.getenv("GUAC_URL", "http://localhost:6225/guacamole")
 GUAC_ADMIN_USER = os.getenv("GUAC_ADMIN_USER", "guacadmin")
 GUAC_ADMIN_PASS = os.getenv("GUAC_ADMIN_PASS", "guacadmin")
 
