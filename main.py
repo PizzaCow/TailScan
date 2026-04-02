@@ -871,6 +871,7 @@ def _elf_entry(proto, host, port, share, path, name, is_dir, size=0, mime=None):
         "dirs": 1 if is_dir else 0,
         "read": 1, "write": 1, "locked": 0, "hidden": 0,
         "ts": 0,
+        "tmb": False,   # disable thumbnail generation — avoids loading full-size files
         "volumeid": f"{proto}_{host}_{port}_{share}_",
     }
     if phash:

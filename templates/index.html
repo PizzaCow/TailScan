@@ -1019,6 +1019,13 @@ function elfShowCreds(container, taskId, elfState) {
     rememberLastDir: false,
     soundPath: '/static/elfinder/sounds/',
     lang: 'en',
+    // Disable thumbnail loading — we don't resize images server-side
+    loadTmbs: 0,
+    commandsOptions: {
+      quicklook: { autoplay: false },
+    },
+    // Disable commands we can't support
+    commands: ['*'],
     uiOptions: {
       toolbar: [['back','forward','up'],['mkdir','upload'],['copy','cut','paste'],['rm'],['info'],['view','sort']],
     },
