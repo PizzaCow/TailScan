@@ -1,6 +1,6 @@
 """TailScan — FastAPI app."""
 
-VERSION = "0.03"
+VERSION = "0.04"
 
 import os
 import time
@@ -515,6 +515,115 @@ async def proxy(request: Request):
 @app.get("/api/version")
 def api_version():
     return {"version": VERSION}
+
+
+# ─── Guacamole integration ──────────────────────────────────────────────────
+
+GUAC_BASE = os.getenv("GUAC_URL", "http://localhost:8085/guacamole")
+GUAC_ADMIN_USER = os.getenv("GUAC_ADMIN_USER", "guacadmin")
+GUAC_ADMIN_PASS = os.getenv("GUAC_ADMIN_PASS", "guacadmin")
+
+_guac_token_cache: dict = {}  # {"token": str, "expires": float}
+
+
+async def _guac_token(client: httpx.AsyncClient) -> str:
+    """Get a Guacamole API auth token, reusing if still valid."""
+    now = time.time()
+    if _guac_token_cache.get("token") and _guac_token_cache.get("expires", 0) > now:
+        return _guac_token_cache["token"]
+    resp = await client.post(
+        f"{GUAC_BASE}/api/tokens",
+        data={"username": GUAC_ADMIN_USER, "password": GUAC_ADMIN_PASS},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    resp.raise_for_status()
+    token = resp.json()["authToken"]
+    _guac_token_cache["token"] = token
+    _guac_token_cache["expires"] = now + 1800  # tokens valid ~30 min
+    return token
+
+
+@app.get("/api/guac-connect")
+async def api_guac_connect(request: Request, ip: str, port: int, proto: str):
+    """
+    Create (or reuse) a Guacamole connection for ip:port via proto (ssh/rdp/vnc),
+    return the direct client URL.
+    """
+    if not get_session(request):
+        raise HTTPException(401)
+    if proto not in ("ssh", "rdp", "vnc"):
+        raise HTTPException(400, "Invalid protocol")
+
+    conn_name = f"tailscan-{proto}-{ip}-{port}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            token = await _guac_token(client)
+
+            # List existing connections
+            r = await client.get(
+                f"{GUAC_BASE}/api/session/data/postgresql/connections",
+                params={"token": token},
+            )
+            r.raise_for_status()
+            existing = r.json()
+
+            # Find or create
+            conn_id = None
+            for cid, conn in existing.items():
+                if conn.get("name") == conn_name:
+                    conn_id = cid
+                    break
+
+            if not conn_id:
+                # Build connection params per protocol
+                params: dict = {"hostname": ip, "port": str(port)}
+                if proto == "ssh":
+                    params.update({"username": "", "private-key": ""})
+                elif proto == "rdp":
+                    params.update({
+                        "username": "", "password": "",
+                        "security": "nla", "ignore-cert": "true",
+                        "resize-method": "reconnect",
+                    })
+                elif proto == "vnc":
+                    params.update({"password": ""})
+
+                payload = {
+                    "name": conn_name,
+                    "protocol": proto,
+                    "parameters": params,
+                    "attributes": {
+                        "max-connections": "5",
+                        "max-connections-per-user": "5",
+                    },
+                    "parentIdentifier": "ROOT",
+                }
+                r = await client.post(
+                    f"{GUAC_BASE}/api/session/data/postgresql/connections",
+                    params={"token": token},
+                    json=payload,
+                )
+                r.raise_for_status()
+                conn_id = r.json()["identifier"]
+                log.info(f"Guacamole: created {proto} connection {conn_id} for {ip}:{port}")
+            else:
+                log.info(f"Guacamole: reusing connection {conn_id} for {ip}:{port}")
+
+            # Build the client URL — Guacamole uses base64url of "id\0c\0default"
+            import base64
+            client_id = base64.b64encode(
+                f"{conn_id}\0c\0postgresql".encode()
+            ).decode().rstrip("=")
+            url = f"{GUAC_BASE}/#/client/{client_id}"
+            return {"url": url, "connection_id": conn_id}
+
+    except httpx.HTTPStatusError as e:
+        log.error(f"Guacamole API error: {e.response.status_code} {e.response.text}")
+        raise HTTPException(502, f"Guacamole API error: {e.response.status_code}")
+    except Exception as e:
+        log.error(f"Guacamole connect error: {e}")
+        raise HTTPException(502, str(e))
 
 
 if __name__ == "__main__":
