@@ -358,24 +358,69 @@ function renderScan(d) {
           ? `<div class="empty-state"><div class="icon">📭</div><p>No devices found on subnet ${escHtml(d.subnet || '')}</p></div>`
           : `<div class="table-wrap"><table>
               <thead><tr>
-                <th>IP</th><th>Hostname</th><th>Ping</th><th>MAC</th><th>Vendor</th><th>OS</th><th>Open Ports</th><th>Status</th>
+                <th>IP</th><th>Hostname</th><th>Ping</th><th>MAC</th><th>Vendor</th><th>Status</th><th></th>
               </tr></thead>
               <tbody>
                 ${devices.map(dev => `
-                  <tr>
+                  <tr id="row-${dev.ip.replace(/\./g,'-')}">
                     <td class="ip-cell">${escHtml(dev.ip)}</td>
                     <td>${escHtml(dev.hostname)}</td>
                     <td class="ping">${dev.ping_ms != null ? dev.ping_ms + ' ms' : '—'}</td>
                     <td class="mac-cell">${escHtml(dev.mac)}</td>
                     <td style="color:var(--muted);font-size:12px;">${escHtml(dev.vendor)}</td>
-                    <td style="color:var(--muted);font-size:12px;">${escHtml(dev.os_guess || '—')}</td>
-                    <td style="font-size:11px;">${(dev.open_ports||[]).map(p=>`<span title="${escHtml(p.service)}" style="display:inline-block;background:var(--surface2);border-radius:3px;padding:1px 5px;margin:1px;cursor:default;">${p.port}</span>`).join('') || '—'}</td>
                     <td class="status-up">●&nbsp;up</td>
+                    <td><button class="btn btn-ghost" style="padding:3px 10px;font-size:11px;" onclick="portScan('${dev.ip}')">Scan Ports</button></td>
+                  </tr>
+                  <tr id="ports-${dev.ip.replace(/\./g,'-')}" style="display:none">
+                    <td colspan="7" style="padding:0 12px 12px 12px;"></td>
                   </tr>`).join('')}
               </tbody>
             </table></div>`
       }
     </div>`;
+}
+
+// ── Port scan ────────────────────────────────────────────────────────────────
+
+async function portScan(ip) {
+  const key = ip.replace(/\./g, '-');
+  const row = document.getElementById(`ports-${key}`);
+  const btn = document.querySelector(`#row-${key} button`);
+  if (!row) return;
+
+  row.style.display = '';
+  row.querySelector('td').innerHTML = `<div style="display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;padding:4px 0"><div class="spinner"></div> Scanning ${escHtml(ip)}...</div>`;
+  if (btn) { btn.disabled = true; btn.textContent = 'Scanning...'; }
+
+  try {
+    const r = await fetch(`/api/port-scan?ip=${encodeURIComponent(ip)}`);
+    const d = await r.json();
+    if (d.error) {
+      row.querySelector('td').innerHTML = `<div style="color:var(--red);font-size:13px;padding:4px 0;">⚠ ${escHtml(d.error)}</div>`;
+    } else {
+      const ports = d.open_ports || [];
+      const os = d.os_guess || 'Unknown';
+      const portHtml = ports.length
+        ? ports.map(p => `
+            <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);">
+              <span style="font-family:monospace;font-weight:600;color:var(--accent);min-width:48px;">${p.port}/${p.proto}</span>
+              <span style="font-size:12px;color:var(--text);">${escHtml(p.service)}</span>
+            </div>`).join('')
+        : '<div style="color:var(--muted);font-size:13px;">No open ports found</div>';
+      row.querySelector('td').innerHTML = `
+        <div style="background:var(--surface2);border-radius:8px;padding:12px;margin:4px 0;">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.7px;color:var(--muted);margin-bottom:8px;">
+            OS: <span style="color:var(--text);font-weight:400;">${escHtml(os)}</span>
+          </div>
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.7px;color:var(--muted);margin-bottom:6px;">Open Ports</div>
+          ${portHtml}
+        </div>`;
+    }
+  } catch(e) {
+    row.querySelector('td').innerHTML = `<div style="color:var(--red);font-size:13px;padding:4px 0;">Scan failed</div>`;
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Rescan'; }
 }
 
 // ── Auto-refresh ─────────────────────────────────────────────────────────────
