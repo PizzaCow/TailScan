@@ -12,11 +12,12 @@ logging.basicConfig(
 )
 
 from fastapi import FastAPI, Request, Response, HTTPException, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 import auth
 import tailscale
 import scanner
+import json
 
 log = logging.getLogger("tailscan")
 
@@ -115,41 +116,48 @@ def api_disconnect(request: Request):
 
 @app.get("/api/scan")
 def api_scan(request: Request):
+    """SSE stream: emits geo/meta first, then one device per event as discovered."""
     if not get_session(request):
         raise HTTPException(401)
 
-    log.info("Starting scan...")
-    geo = scanner.get_wan_geo()
-    log.info(f"WAN geo: {geo}")
-    current_exit = tailscale.get_current_exit_node()
-    log.info(f"Current exit node: {current_exit!r}")
+    def generate():
+        log.info("Starting scan (stream)...")
+        geo = scanner.get_wan_geo()
+        current_exit = tailscale.get_current_exit_node()
+        subnet = scanner.detect_lan_subnet(exit_node_ip=current_exit) if current_exit else None
+        log.info(f"Exit: {current_exit!r}, subnet: {subnet!r}")
 
-    if not current_exit:
-        return {
-            "connected": False,
+        meta = {
+            "type": "meta",
+            "connected": bool(current_exit),
+            "exit_node_ip": current_exit,
             "geo": geo,
-            "devices": [],
-            "subnet": None,
+            "subnet": subnet or "unknown",
         }
+        yield f"data: {json.dumps(meta)}\n\n"
 
-    subnet = scanner.detect_lan_subnet(exit_node_ip=current_exit)
-    log.info(f"Detected subnet: {subnet!r}")
-    devices = []
-    if subnet:
-        log.info(f"Scanning subnet {subnet}...")
-        devices = scanner.scan_lan(subnet)
-        log.info(f"Scan returned {len(devices)} devices")
-    else:
-        log.warning("Could not detect subnet")
-        devices = [{"error": "Could not detect LAN subnet. The exit node may not be advertising its local routes."}]
+        if not current_exit:
+            return
 
-    return {
-        "connected": True,
-        "exit_node_ip": current_exit,
-        "geo": geo,
-        "subnet": subnet or "unknown",
-        "devices": devices,
-    }
+        if not subnet:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Could not detect LAN subnet. Enable subnet routes on the exit node.'})}\n\n"
+            return
+
+        count = 0
+        for device in scanner.scan_lan_stream(subnet):
+            if "error" in device:
+                yield f"data: {json.dumps({'type': 'error', 'message': device['error']})}\n\n"
+                return
+            device["type"] = "device"
+            count += 1
+            log.info(f"Device: {device.get('ip')} ({device.get('hostname')})")
+            yield f"data: {json.dumps(device)}\n\n"
+
+        log.info(f"Scan complete: {count} devices")
+        yield f"data: {json.dumps({'type': 'done', 'count': count})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 if __name__ == "__main__":
