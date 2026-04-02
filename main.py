@@ -704,8 +704,8 @@ async def api_guac_connect(request: Request, ip: str, port: int, proto: str):
             request_host = request.headers.get("host", "localhost").split(":")[0]
             guac_public_base = f"http://{request_host}:8085/guacamole"
             client_url = f"{guac_public_base}/#/client/{client_id}"
-            # Route through /guac-launch so mobile gets OSK pre-enabled
-            url = f"/guac-launch?target={client_url}&proto={proto}"
+            # Load Guacamole client URL directly (works in both iframe and new tab)
+            url = client_url
             return {"url": url, "connection_id": conn_id}
 
     except httpx.HTTPStatusError as e:
@@ -741,7 +741,7 @@ async def api_browse_session(request: Request, url: str, width: int = 1280, heig
                 ).decode().rstrip("=")
                 request_host = request.headers.get("host", "localhost").split(":")[0]
                 guac_url = f"http://{request_host}:8085/guacamole/#/client/{client_id}"
-                return {"url": f"/guac-launch?target={guac_url}&proto=vnc"}
+                return {"url": guac_url}
         except Exception:
             pass
         # Container died — clean up
@@ -815,7 +815,7 @@ async def api_browse_session(request: Request, url: str, width: int = 1280, heig
     ).decode().rstrip("=")
     request_host = request.headers.get("host", "localhost").split(":")[0]
     guac_url = f"http://{request_host}:8085/guacamole/#/client/{client_id}"
-    return {"url": f"/guac-launch?target={guac_url}&proto=vnc"}
+    return {"url": guac_url}
 
 
 @app.delete("/api/browse-session")
@@ -903,16 +903,24 @@ async def _elf_ls(proto, host, port, share, path, user, password):
 async def _elf_open(proto, host, port, share, path, user, password):
     """Return (entries, cwd_entry) for a directory."""
     cwd_entry = _elf_entry(proto, host, port, share, path, path.rstrip("/").split("/")[-1] or "root", True)
-    if path == "/":
+    if path == "/" and not share:
         cwd_entry = _elf_root_entry(proto, host, port, share)
+    elif path == "/":
+        cwd_entry = _elf_root_entry(proto, host, port, share)
+
     entries = await _asyncio.get_event_loop().run_in_executor(
         None, lambda: _elf_ls_sync(proto, host, port, share, path, user, password)
     )
     files = []
     for e in entries:
-        child_path = (path.rstrip("/") + "/" + e["name"])
-        files.append(_elf_entry(proto, host, port, share, child_path,
-                                e["name"], e["type"] == "dir", e.get("size", 0)))
+        if e.get("type") == "share":
+            # SMB share listing — each "entry" is a share, encode share name into hash
+            files.append(_elf_entry(proto, host, port, e["name"], "/",
+                                    e["name"], True))
+        else:
+            child_path = (path.rstrip("/") + "/" + e["name"])
+            files.append(_elf_entry(proto, host, port, share, child_path,
+                                    e["name"], e["type"] == "dir", e.get("size", 0)))
     return cwd_entry, files
 
 def _elf_ls_sync(proto, host, port, share, path, user, password):

@@ -197,6 +197,12 @@ def smb_list_shares(host: str, username: str, password: str, port: int = 445) ->
 def smb_list(host: str, username: str, password: str,
              share: str, path: str, port: int = 445) -> list:
     import smbclient
+    if not share:
+        # No share specified — return share list as "directories"
+        shares = smb_list_shares(host, username, password, port)
+        if shares:
+            return shares
+        raise ValueError("Could not enumerate shares. Please enter a share name.")
     _smb_conn(host, username, password, port)
     unc = _smb_unc(host, share, path)
     entries = []

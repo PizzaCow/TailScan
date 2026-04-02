@@ -899,13 +899,13 @@ fetch('/api/version').then(r=>r.json()).then(d=>{
 </script>
 
 <!-- ── Taskbar ────────────────────────────────────────────────────────── -->
-<div id="taskbar" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:8000;background:var(--surface);border-top:1px solid var(--border);display:flex;align-items:stretch;height:36px;gap:0;">
+<div id="taskbar" style="position:fixed;bottom:0;left:0;right:0;z-index:8000;background:var(--surface);border-top:1px solid var(--border);display:flex;align-items:stretch;height:36px;gap:0;">
   <div id="taskbar-tabs" style="display:flex;align-items:stretch;flex:1;overflow-x:auto;gap:2px;padding:3px 4px;"></div>
   <button id="taskbar-close-all" onclick="tsCloseAll()" title="Close all tasks" style="padding:0 10px;background:none;border:none;border-left:1px solid var(--border);color:var(--muted);cursor:pointer;font-size:13px;flex-shrink:0;">&times; all</button>
 </div>
 
 <!-- Task panels container (iframes + elFinder panels live here) -->
-<div id="task-panels" style="position:fixed;bottom:36px;left:0;right:0;top:0;z-index:7999;pointer-events:none;"></div>
+<div id="task-panels" style="position:fixed;bottom:36px;left:0;right:0;top:0;z-index:7999;pointer-events:none;display:none;"></div>
 
 <style>
 .ts-tab {
@@ -1106,13 +1106,25 @@ if (_origApplyTheme) {
 // ── Taskbar ───────────────────────────────────────────────────────────────────
 
 const _tsTasks = {}; // id -> { label, type, url, elfState }
-let _tsActive = null;
+let _tsActive = 'home';
 let _tsNextId = 1;
 
-const _tsIcons = { web: '🌐', ssh: '🖥', rdp: '🖥', vnc: '🖥', files: '📁' };
+const _tsIcons = { home: '🏠', web: '🌐', ssh: '🖥', rdp: '🖥', vnc: '🖥', files: '📁' };
+
+// Create permanent Home tab on page load
+(function() {
+  const tabs = document.getElementById('taskbar-tabs');
+  const tab = document.createElement('div');
+  tab.className = 'ts-tab active';
+  tab.id = 'tab-home';
+  tab.innerHTML = `<span class="ts-icon">🏠</span><span class="ts-label">Home</span>`;
+  tab.addEventListener('click', () => tsActivate('home'));
+  tabs.appendChild(tab);
+  document.body.style.paddingBottom = '36px';
+})();
 
 function tsOpen(url, label, type, elfState) {
-  // Reuse existing task with same url/label if already open
+  // Reuse existing task with same url if already open
   for (const [id, t] of Object.entries(_tsTasks)) {
     if (t.url === url && t.type === type && url !== null) {
       tsActivate(id); return;
@@ -1135,18 +1147,14 @@ function tsOpen(url, label, type, elfState) {
   panels.appendChild(panel);
 
   if (type === 'files') {
-    // elFinder panel — render creds dialog inside
-    panel.style.display = 'flex';
     panel.innerHTML = `<div id="elf-inner-${id}" style="flex:1;display:flex;flex-direction:column;"></div>`;
-    // Defer to after DOM update
     setTimeout(() => {
       _elfState = { ...elfState };
       const container = document.getElementById('elf-inner-' + id);
       _elfShowCredsInContainer(container, id);
     }, 0);
   } else {
-    // iframe for web / guacamole
-    panel.innerHTML = `<iframe src="${escAttr(url)}" allow="fullscreen" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"></iframe>`;
+    panel.innerHTML = `<iframe src="${escAttr(url)}" allow="fullscreen *" allowfullscreen></iframe>`;
   }
 
   // Create tab
@@ -1158,21 +1166,27 @@ function tsOpen(url, label, type, elfState) {
   tab.addEventListener('click', () => tsActivate(id));
   tabs.appendChild(tab);
 
-  document.getElementById('taskbar').style.display = 'flex';
   tsActivate(id);
 }
 
 function tsActivate(id) {
-  // Hide all panels, deactivate all tabs
   document.querySelectorAll('.ts-panel').forEach(p => p.classList.remove('visible'));
   document.querySelectorAll('.ts-tab').forEach(t => t.classList.remove('active'));
   _tsActive = id;
-  const panel = document.getElementById('panel-' + id);
+
   const tab = document.getElementById('tab-' + id);
-  if (panel) panel.classList.add('visible');
   if (tab) tab.classList.add('active');
-  // Shrink main content area
-  document.body.style.paddingBottom = '36px';
+
+  if (id === 'home') {
+    // Show main page content, hide panels overlay
+    document.getElementById('task-panels').style.display = 'none';
+    document.querySelector('.main-layout, main, #app, body > div:not(#taskbar):not(#task-panels):not(#elfinder-modal)')?.style && null;
+  } else {
+    // Show panels overlay
+    document.getElementById('task-panels').style.display = 'block';
+    const panel = document.getElementById('panel-' + id);
+    if (panel) panel.classList.add('visible');
+  }
 }
 
 function tsClose(id) {
@@ -1181,28 +1195,18 @@ function tsClose(id) {
   if (panel) panel.remove();
   if (tab) tab.remove();
   delete _tsTasks[id];
-  if (_tsActive === id) {
-    _tsActive = null;
-    document.body.style.paddingBottom = '';
-    // Activate last remaining task if any
-    const ids = Object.keys(_tsTasks);
-    if (ids.length) tsActivate(ids[ids.length - 1]);
-  }
-  if (!Object.keys(_tsTasks).length) {
-    document.getElementById('taskbar').style.display = 'none';
-    document.body.style.paddingBottom = '';
-  }
+  // Go to last task or home
+  const ids = Object.keys(_tsTasks);
+  tsActivate(ids.length ? ids[ids.length - 1] : 'home');
 }
 
 function tsCloseAll() {
   Object.keys(_tsTasks).forEach(id => {
     document.getElementById('panel-' + id)?.remove();
     document.getElementById('tab-' + id)?.remove();
+    delete _tsTasks[id];
   });
-  Object.keys(_tsTasks).forEach(k => delete _tsTasks[k]);
-  _tsActive = null;
-  document.getElementById('taskbar').style.display = 'none';
-  document.body.style.paddingBottom = '';
+  tsActivate('home');
 }
 
 function escAttr(s) {
