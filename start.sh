@@ -16,10 +16,10 @@ install_pkg() {
   fi
 }
 
-# masscan — fast host discovery (needs root/raw sockets)
-if ! command -v masscan &>/dev/null; then
-  echo "Installing masscan..."
-  install_pkg masscan
+# fping — fast parallel ping sweep for host discovery
+if ! command -v fping &>/dev/null; then
+  echo "Installing fping..."
+  install_pkg fping
 fi
 
 # nmap — used for on-demand port scanning per device
