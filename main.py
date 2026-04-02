@@ -653,7 +653,13 @@ async def api_guac_connect(request: Request, ip: str, port: int, proto: str):
                 # Build connection params per protocol
                 params: dict = {"hostname": ip, "port": str(port)}
                 if proto == "ssh":
-                    params.update({"username": "", "private-key": ""})
+                    params.update({
+                        "username": "",
+                        "private-key": "",
+                        # Enable SFTP file transfer panel in Guacamole
+                        "enable-sftp": "true",
+                        "sftp-root-directory": "/",
+                    })
                 elif proto == "rdp":
                     params.update({
                         "username": "", "password": "",
@@ -829,6 +835,158 @@ async def api_browse_session_delete(request: Request, url: str):
     except Exception:
         pass
     return {"status": "stopped"}
+
+
+# ─── File browser API ────────────────────────────────────────────────────────
+import filebrowser as fb
+from fastapi.responses import StreamingResponse as _StreamingResponse
+import io as _io
+
+# ── FTP ──────────────────────────────────────────────────────────────────────
+
+@app.get("/api/ftp/list")
+def ftp_list(request: Request, host: str, port: int = 21,
+             username: str = "", password: str = "", path: str = "/"):
+    if not get_session(request):
+        raise HTTPException(401)
+    try:
+        return fb.ftp_list(host, port, username, password, path)
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+@app.get("/api/ftp/download")
+def ftp_download(request: Request, host: str, port: int = 21,
+                 username: str = "", password: str = "", path: str = ""):
+    if not get_session(request):
+        raise HTTPException(401)
+    try:
+        data = fb.ftp_download(host, port, username, password, path)
+        filename = path.split("/")[-1] or "file"
+        return _StreamingResponse(
+            _io.BytesIO(data),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+@app.post("/api/ftp/upload")
+async def ftp_upload(request: Request, host: str, port: int = 21,
+                     username: str = "", password: str = "", path: str = ""):
+    if not get_session(request):
+        raise HTTPException(401)
+    try:
+        data = await request.body()
+        fb.ftp_upload(host, port, username, password, path, data)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+@app.post("/api/ftp/mkdir")
+def ftp_mkdir(request: Request, host: str, port: int = 21,
+              username: str = "", password: str = "", path: str = ""):
+    if not get_session(request):
+        raise HTTPException(401)
+    try:
+        fb.ftp_mkdir(host, port, username, password, path)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+@app.delete("/api/ftp/delete")
+def ftp_delete(request: Request, host: str, port: int = 21,
+               username: str = "", password: str = "",
+               path: str = "", is_dir: bool = False):
+    if not get_session(request):
+        raise HTTPException(401)
+    try:
+        fb.ftp_delete(host, port, username, password, path, is_dir)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+# ── SMB ──────────────────────────────────────────────────────────────────────
+
+@app.get("/api/smb/shares")
+def smb_shares(request: Request, host: str, port: int = 445,
+               username: str = "", password: str = ""):
+    if not get_session(request):
+        raise HTTPException(401)
+    try:
+        return fb.smb_list_shares(host, username, password, port)
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+@app.get("/api/smb/list")
+def smb_list(request: Request, host: str, share: str, path: str = "/",
+             port: int = 445, username: str = "", password: str = ""):
+    if not get_session(request):
+        raise HTTPException(401)
+    try:
+        return fb.smb_list(host, username, password, share, path, port)
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+@app.get("/api/smb/download")
+def smb_download(request: Request, host: str, share: str, path: str,
+                 port: int = 445, username: str = "", password: str = ""):
+    if not get_session(request):
+        raise HTTPException(401)
+    try:
+        data = fb.smb_download(host, username, password, share, path, port)
+        filename = path.split("/")[-1].split("\\")[-1] or "file"
+        return _StreamingResponse(
+            _io.BytesIO(data),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+@app.post("/api/smb/upload")
+async def smb_upload(request: Request, host: str, share: str, path: str,
+                     port: int = 445, username: str = "", password: str = ""):
+    if not get_session(request):
+        raise HTTPException(401)
+    try:
+        data = await request.body()
+        fb.smb_upload(host, username, password, share, path, data, port)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+@app.post("/api/smb/mkdir")
+def smb_mkdir(request: Request, host: str, share: str, path: str,
+              port: int = 445, username: str = "", password: str = ""):
+    if not get_session(request):
+        raise HTTPException(401)
+    try:
+        fb.smb_mkdir(host, username, password, share, path, port)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+@app.delete("/api/smb/delete")
+def smb_delete(request: Request, host: str, share: str, path: str,
+               port: int = 445, username: str = "", password: str = "",
+               is_dir: bool = False):
+    if not get_session(request):
+        raise HTTPException(401)
+    try:
+        fb.smb_delete(host, username, password, share, path, is_dir, port)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(502, str(e))
 
 
 if __name__ == "__main__":
