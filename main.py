@@ -961,9 +961,11 @@ async def elfinder_connector(request: Request):
         target = params.get("target", "")
         if init or not target:
             path = "/"
+            # use share/creds from URL params on init
         else:
             try:
-                _, _, _, _, path = _elf_decode(target)
+                # Decode share AND path from the hash — don't rely on URL params
+                _, _, _, share, path = _elf_decode(target)
             except Exception:
                 path = "/"
         try:
@@ -981,7 +983,7 @@ async def elfinder_connector(request: Request):
     elif cmd == "ls":
         target = params.get("target", "")
         try:
-            _, _, _, _, path = _elf_decode(target)
+            _, _, _, share, path = _elf_decode(target)
             entries = await _asyncio.get_event_loop().run_in_executor(
                 None, lambda: _elf_ls_sync(proto, host, port, share, path, user, password)
             )
@@ -993,7 +995,7 @@ async def elfinder_connector(request: Request):
     elif cmd == "tree":
         target = params.get("target", "")
         try:
-            _, _, _, _, path = _elf_decode(target)
+            _, _, _, share, path = _elf_decode(target)
             entries = await _asyncio.get_event_loop().run_in_executor(
                 None, lambda: _elf_ls_sync(proto, host, port, share, path, user, password)
             )

@@ -349,8 +349,36 @@ body.theme-rosepine .port-chip.o:hover { background: rgba(246,193,119,0.25); col
 .elf-dark .elfinder button.ui-state-hover { background: var(--surface2) !important; border-color: var(--accent) !important; }
 .elf-dark .elfinder .ui-dialog { background: var(--surface) !important; border: 1px solid var(--border) !important; color: var(--text) !important; }
 .elf-dark .elfinder .ui-dialog .ui-dialog-titlebar { background: var(--surface2) !important; color: var(--text) !important; border-bottom: 1px solid var(--border) !important; }
-.elf-dark .elfinder .ui-dialog input,
-.elf-dark .elfinder .ui-dialog textarea { background: var(--bg) !important; color: var(--text) !important; border: 1px solid var(--border) !important; }
+.elf-dark .elfinder .ui-dialog .ui-dialog-titlebar-close { background: var(--surface2) !important; border-color: var(--border) !important; }
+.elf-dark .elfinder .ui-dialog .ui-dialog-buttonpane { background: var(--surface2) !important; border-top: 1px solid var(--border) !important; }
+.elf-dark .elfinder .ui-dialog .ui-dialog-buttonpane button { background: var(--accent) !important; color: #fff !important; border: none !important; border-radius: 5px !important; }
+/* All inputs, selects, textareas inside elFinder */
+.elf-dark .elfinder input,
+.elf-dark .elfinder select,
+.elf-dark .elfinder textarea {
+  background: var(--surface2) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 4px !important;
+  outline: none !important;
+}
+.elf-dark .elfinder input:focus,
+.elf-dark .elfinder select:focus,
+.elf-dark .elfinder textarea:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent) !important;
+}
+/* jQuery UI widget backgrounds */
+.elf-dark .elfinder .ui-widget-content { background: var(--surface) !important; color: var(--text) !important; border-color: var(--border) !important; }
+.elf-dark .elfinder .ui-widget-header { background: var(--surface2) !important; color: var(--text) !important; border-color: var(--border) !important; }
+.elf-dark .elfinder .ui-state-default,
+.elf-dark .elfinder .ui-widget-content .ui-state-default { background: var(--surface) !important; color: var(--text) !important; border-color: var(--border) !important; }
+.elf-dark .elfinder .ui-state-hover,
+.elf-dark .elfinder .ui-widget-content .ui-state-hover { background: var(--surface2) !important; color: var(--text) !important; border-color: var(--accent) !important; }
+/* Rename input in file list */
+.elf-dark .elfinder .elfinder-cwd-filename input { background: var(--surface2) !important; color: var(--text) !important; border: 1px solid var(--accent) !important; }
+/* Toolbar search */
+.elf-dark .elfinder .elfinder-toolbar input { background: var(--surface2) !important; color: var(--text) !important; }
 .elf-dark .elfinder .elfinder-contextmenu { background: var(--surface) !important; border: 1px solid var(--border) !important; }
 .elf-dark .elfinder .elfinder-contextmenu-item:hover { background: var(--surface2) !important; }
 .elf-dark .elfinder ::-webkit-scrollbar { width: 6px; height: 6px; }
