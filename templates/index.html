@@ -1002,12 +1002,16 @@ function fbBreadcrumb() {
 }
 
 async function fbConnect() {
-  const user = document.getElementById('fb-user').value;
-  const pass = document.getElementById('fb-pass').value;
-  fbState.user = user;
-  fbState.pass = pass;
+  fbState.user = document.getElementById('fb-user').value;
+  fbState.pass = document.getElementById('fb-pass').value;
+  const shareVal = document.getElementById('fb-share').value.trim();
   if (fbState.proto === 'smb') {
-    await fbLoadShares();
+    if (shareVal) {
+      // Share already entered — go straight to browsing it
+      fbSelectShare(shareVal);
+    } else {
+      await fbLoadShares();
+    }
   } else {
     await fbNav('/');
   }
@@ -1015,20 +1019,33 @@ async function fbConnect() {
 
 async function fbLoadShares() {
   fbStatus('Loading shares...');
-  const { host, port, user='', pass='' } = fbState;
+  const { host, port } = fbState;
+  const user = fbState.user || '';
+  const pass = fbState.pass || '';
   try {
-    const r = await fetch(`/api/smb/shares?host=${encodeURIComponent(host)}&port=${port}&username=${encodeURIComponent(user||'')}&password=${encodeURIComponent(pass||'')}`);
-    if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); fbStatus(e.detail||r.statusText, true); return; }
+    const r = await fetch(`/api/smb/shares?host=${encodeURIComponent(host)}&port=${port}&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`);
+    if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); fbStatus(e.detail||r.statusText, true); fbShowManualShare(); return; }
     const shares = await r.json();
     fbStatus('');
     const list = document.getElementById('fb-list');
-    if (!shares.length) { list.innerHTML = '<div style="padding:24px;text-align:center;color:#6b7280">No accessible shares</div>'; return; }
+    if (!shares.length) { fbShowManualShare(); return; }
     list.innerHTML = shares.map(s => `
       <div class="fb-row" onclick="fbSelectShare('${escHtml(s.name)}')">
         <span class="fb-icon">&#128191;</span>
         <span class="fb-name">${escHtml(s.name)}</span>
       </div>`).join('');
-  } catch(e) { fbStatus(String(e), true); }
+  } catch(e) { fbStatus(String(e), true); fbShowManualShare(); }
+}
+
+function fbShowManualShare() {
+  const shareInput = document.getElementById('fb-share');
+  document.getElementById('fb-share-wrap').style.display = '';
+  shareInput.focus();
+  const list = document.getElementById('fb-list');
+  list.innerHTML = `<div style="padding:20px 16px;color:#9ca3af;font-size:13px;">
+    Share enumeration not available. Enter the share name above and press
+    <strong style="color:#fdba74">Connect</strong> to browse it.
+  </div>`;
 }
 
 function fbSelectShare(share) {

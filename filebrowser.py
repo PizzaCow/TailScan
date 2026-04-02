@@ -105,21 +105,82 @@ def ftp_delete(host: str, port: int, username: str, password: str,
 
 def _smb_conn(host: str, username: str, password: str, port: int = 445):
     import smbclient
+    # Always reset the session for this host so stale/bad sessions don't linger
+    try:
+        smbclient.delete_session(host, port=port)
+    except Exception:
+        pass
     smbclient.register_session(
         host,
-        username=username or "guest",
-        password=password or "",
+        username=username if username else None,
+        password=password if password else None,
         port=port,
     )
 
 
 def smb_list_shares(host: str, username: str, password: str, port: int = 445) -> list:
-    import smbclient
-    _smb_conn(host, username, password, port)
-    shares = []
-    for share in smbclient.listshares(host):
-        shares.append({"name": share, "type": "share"})
-    return shares
+    """
+    Enumerate SMB shares via smbclient CLI (net utility) or impacket if available.
+    Falls back to asking the user to enter the share name manually.
+    """
+    # Try smbclient CLI (net/smbclient command line tool)
+    import subprocess
+    creds = []
+    if username:
+        creds += ["-U", f"{username}%{password}" if password else username]
+    else:
+        creds += ["-N"]  # no auth / guest
+    try:
+        result = subprocess.run(
+            ["smbclient", "-L", f"//{host}", "--port", str(port)] + creds,
+            capture_output=True, text=True, timeout=10
+        )
+        shares = []
+        in_list = False
+        for line in result.stdout.splitlines():
+            if "Sharename" in line:
+                in_list = True
+                continue
+            if in_list:
+                if line.strip() == "" or line.startswith("\t-"):
+                    continue
+                if line.startswith("\t") or line.startswith("        "):
+                    parts = line.split(None, 2)
+                    if parts:
+                        name = parts[0].strip()
+                        stype = parts[1].strip() if len(parts) > 1 else ""
+                        if stype not in ("IPC", "Printer"):
+                            shares.append({"name": name, "type": "share"})
+                else:
+                    in_list = False
+        if shares:
+            return shares
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Try impacket if installed
+    try:
+        from impacket.smbconnection import SMBConnection
+        smb = SMBConnection(host, host, sess_port=port)
+        if username:
+            smb.login(username, password or "")
+        else:
+            smb.login("", "")
+        shares = []
+        for share in smb.listShares():
+            name = share["shi1_netname"].get_value().rstrip("\x00")
+            stype = share["shi1_type"].get_value()
+            if stype == 0:  # DISK
+                shares.append({"name": name, "type": "share"})
+        smb.logoff()
+        return shares
+    except ImportError:
+        pass
+    except Exception as e:
+        log.debug("impacket share enum failed: %s", e)
+
+    # Nothing worked — return empty so the UI falls back to manual entry
+    return []
 
 
 def smb_list(host: str, username: str, password: str,
