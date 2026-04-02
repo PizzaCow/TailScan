@@ -615,7 +615,13 @@ async def api_guac_connect(request: Request, ip: str, port: int, proto: str):
             client_id = base64.b64encode(
                 f"{conn_id}\0c\0postgresql".encode()
             ).decode().rstrip("=")
-            url = f"{GUAC_BASE}/#/client/{client_id}"
+            # Build the client URL using the incoming request's host so it
+            # works regardless of whether the user is on localhost, LAN IP,
+            # or a domain name.  The internal GUAC_BASE is still used for
+            # server-side API calls; only the browser-facing URL changes.
+            request_host = request.headers.get("host", "localhost").split(":")[0]
+            guac_public_base = f"http://{request_host}:8085/guacamole"
+            url = f"{guac_public_base}/#/client/{client_id}"
             return {"url": url, "connection_id": conn_id}
 
     except httpx.HTTPStatusError as e:
