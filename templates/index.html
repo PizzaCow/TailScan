@@ -624,8 +624,8 @@ const FILE_PROTO_LABELS = {
 // Ports that open in Guacamole (green chips)
 const GUAC_PORTS = new Set([22, 3389, 5900, 5901, 5902, 5903]);
 const GUAC_PROTOCOLS = {22: 'ssh', 3389: 'rdp', 5900: 'vnc', 5901: 'vnc', 5902: 'vnc', 5903: 'vnc'};
-// Set this to your Guacamole URL once deployed, e.g. 'http://100.97.92.103:9090/guacamole'
-const GUAC_URL = null;  // null = show green chip but no link yet
+// Guacamole is running on the same host as TailScan
+const GUAC_URL = 'http://100.99.195.16:8085/guacamole';
 
 function buildChips(ip, ports) {
   return ports.map(p => {
@@ -636,15 +636,8 @@ function buildChips(ip, ports) {
 
     if (isGuac) {
       const proto = GUAC_PROTOCOLS[p.port];
-      const tip = GUAC_URL
-        ? `${escHtml(p.service)} — open in Guacamole (${proto.toUpperCase()})`
-        : `${escHtml(p.service)} — Guacamole not deployed yet`;
-      if (GUAC_URL) {
-        const href = `${GUAC_URL}/#/client/${btoa('#' + proto + '\0c\0' + 'default')}`;
-        return `<a class="port-chip guac-chip" href="${href}" target="_blank">${p.port}<span class="chip-tip">${tip}</span></a>`;
-      } else {
-        return `<span class="port-chip guac-chip no-browse">${p.port}<span class="chip-tip">${tip}</span></span>`;
-      }
+      const tip = `${escHtml(p.service)} — open in Guacamole (${proto.toUpperCase()})`;
+      return `<span class="port-chip guac-chip" onclick="openGuac('${ip}', ${p.port}, '${proto}')" title="${tip}">${p.port}<span class="chip-tip">${tip}</span></span>`;
 
     } else if (isCopyparty) {
       const tUrl = encodeURIComponent(`http://${ip}:${p.port}/`);
@@ -826,6 +819,27 @@ function showError(msg) {
       <div style="font-size:40px;margin-bottom:12px;">⚠️</div>
       <p>${escHtml(msg)}</p>
     </div>`;
+}
+
+// ── Guacamole ─────────────────────────────────────────────────────────────────
+
+async function openGuac(ip, port, proto) {
+  // Show loading cursor
+  document.body.style.cursor = 'wait';
+  try {
+    const r = await fetch(`/api/guac-connect?ip=${encodeURIComponent(ip)}&port=${port}&proto=${proto}`);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({detail: r.statusText}));
+      alert(`Guacamole error: ${err.detail || r.statusText}`);
+      return;
+    }
+    const d = await r.json();
+    window.open(d.url, '_blank');
+  } catch(e) {
+    alert(`Failed to connect to Guacamole: ${e}`);
+  } finally {
+    document.body.style.cursor = '';
+  }
 }
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
