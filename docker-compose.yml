@@ -1,0 +1,53 @@
+services:
+
+  tailscan:
+    build: .
+    container_name: tailscan
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
+      - tailscan-cache:/tmp/tailscan-cache
+    env_file: .env
+    environment:
+      - CACHE_DIR=/tmp/tailscan-cache
+      - GUAC_URL=http://localhost:8085/guacamole
+
+  guacd:
+    image: guacamole/guacd:latest
+    container_name: guacd
+    restart: unless-stopped
+    network_mode: host
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: guac-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: guacamole_db
+      POSTGRES_USER: guacamole
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - guac-pgdata:/var/lib/postgresql/data
+      - ./guacamole/initdb.sql:/docker-entrypoint-initdb.d/initdb.sql:ro
+
+  guacamole:
+    image: guacamole/guacamole:latest
+    container_name: guacamole
+    restart: unless-stopped
+    depends_on:
+      - guacd
+      - postgres
+    ports:
+      - "8085:8080"
+    environment:
+      GUACD_HOSTNAME: 127.0.0.1
+      GUACD_PORT: 4822
+      POSTGRESQL_HOSTNAME: guac-postgres
+      POSTGRESQL_DATABASE: guacamole_db
+      POSTGRESQL_USER: guacamole
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD}
+
+volumes:
+  tailscan-cache:
+  guac-pgdata:
