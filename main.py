@@ -126,32 +126,35 @@ def api_scan(request: Request):
         log.info("Starting scan (stream)...")
         geo = scanner.get_wan_geo()
         current_exit = tailscale.get_current_exit_node()
-        subnet = scanner.detect_lan_subnet(exit_node_ip=current_exit) if current_exit else None
-        log.info(f"Exit: {current_exit!r}, subnet: {subnet!r}")
+        subnets = scanner.detect_lan_subnets(exit_node_ip=current_exit) if current_exit else []
+        log.info(f"Exit: {current_exit!r}, subnets: {subnets!r}")
 
         meta = {
             "type": "meta",
             "connected": bool(current_exit),
             "exit_node_ip": current_exit,
             "geo": geo,
-            "subnet": subnet or "unknown",
+            "subnet": ", ".join(subnets) if subnets else "unknown",
         }
         yield f"data: {json.dumps(meta)}\n\n"
 
         if not current_exit:
             return
 
-        if not subnet:
+        if not subnets:
             yield f"data: {json.dumps({'type': 'error', 'message': 'Could not detect LAN subnet. Enable subnet routes on the exit node.'})}\n\n"
             return
 
         count = 0
-        for device in scanner.scan_lan_stream(subnet):
-            if "error" in device:
-                yield f"data: {json.dumps({'type': 'error', 'message': device['error']})}\n\n"
-                return
-            device["type"] = "device"
-            count += 1
+        for subnet in subnets:
+            log.info(f"Scanning subnet {subnet}")
+        for subnet in subnets:
+            for device in scanner.scan_lan_stream(subnet):
+                if "error" in device:
+                    yield f"data: {json.dumps({'type': 'error', 'message': device['error']})}\n\n"
+                    return
+                device["type"] = "device"
+                count += 1
             log.info(f"Device: {device.get('ip')} ({device.get('hostname')})")
             yield f"data: {json.dumps(device)}\n\n"
 
