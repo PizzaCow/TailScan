@@ -168,38 +168,11 @@ def api_scan(request: Request):
 
 @app.get("/browse", response_class=HTMLResponse)
 def browse(request: Request, ip: str, port: int = 80):
-    """Wrapper page that loads the proxied LAN device in an iframe."""
+    """Redirect straight into the full-page proxy (no iframe)."""
     if not get_session(request):
         return RedirectResponse("/login")
     scheme = "https" if port in (443, 8443, 8006) else "http"
-    proxy_root = f"/proxy/{scheme}/{ip}/{port}/"
-    return HTMLResponse(f"""<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Browse {ip}:{port} — TailScan</title>
-  <style>
-    * {{ margin:0; padding:0; box-sizing:border-box; }}
-    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background:#0f1117; color:#e2e8f0; display:flex; flex-direction:column; height:100vh; }}
-    .bar {{ display:flex; align-items:center; gap:12px; padding:0 16px; height:44px;
-            background:#1a1d27; border-bottom:1px solid #2d3148; flex-shrink:0; font-size:13px; }}
-    .bar a {{ color:#5b6ee8; text-decoration:none; }}
-    .bar a:hover {{ text-decoration:underline; }}
-    .bar .addr {{ font-family:monospace; color:#a5b4fc; }}
-    iframe {{ flex:1; border:none; width:100%; background:#fff; }}
-  </style>
-</head>
-<body>
-  <div class="bar">
-    <a href="/">← TailScan</a>
-    <span style="color:#7c85a2;">|</span>
-    <span class="addr">{scheme}://{ip}:{port}</span>
-    <span style="color:#7c85a2;font-size:11px;">(proxied via exit node)</span>
-  </div>
-  <iframe src="{proxy_root}" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
-</body>
-</html>""")
+    return RedirectResponse(f"/proxy/{scheme}/{ip}/{port}/")
 
 
 @app.api_route("/proxy/{scheme}/{ip}/{port}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
@@ -240,24 +213,85 @@ async def proxy(request: Request, scheme: str, ip: str, port: int, path: str):
     content_type = resp.headers.get("content-type", "")
     content = resp.content
 
-    # Rewrite absolute URLs in HTML so links stay proxied
+    # Rewrite HTML: fix links + inject JS interceptor for SPA navigation
     if "text/html" in content_type:
         proxy_base = f"/proxy/{scheme}/{ip}/{port}"
+        origin = f"{scheme}://{ip}:{port}"
         text = content.decode("utf-8", errors="replace")
-        # href="/foo" → href="/proxy/http/ip/port/foo"
+
+        # Rewrite root-relative href/src/action="/path" → proxied
         text = re.sub(
-            r'(href|src|action)=["\']/((?!proxy/|/).*?)["\']',
-            lambda m: f'{m.group(1)}="{proxy_base}/{m.group(2)}"',
+            r'(href|src|action)=(["\'])/(?!/)',
+            lambda m: f'{m.group(1)}={m.group(2)}{proxy_base}/',
             text
         )
-        # absolute http://ip:port/path → proxied
+        # Rewrite absolute origin URLs → proxied
         text = re.sub(
-            rf'{scheme}://{re.escape(ip)}:{port}(/[^"\']*)?',
+            rf'{re.escape(origin)}(/[^"\'> ]*)?',
             lambda m: f"{proxy_base}{m.group(1) or '/'}",
             text
         )
+
+        # Inject JS interceptor before </head> (or at top of body) to handle:
+        # - fetch() / XHR with root-relative or absolute URLs
+        # - window.location / history.pushState navigation
+        # - dynamically inserted <a> / <form> elements
+        interceptor = f"""<script>
+(function() {{
+  var _proxyBase = {repr(proxy_base)};
+  var _origin = {repr(origin)};
+  function _rw(url) {{
+    if (!url) return url;
+    if (url.startsWith(_origin)) return _proxyBase + url.slice(_origin.length) || _proxyBase + '/';
+    if (url.startsWith('/') && !url.startsWith('//') && !url.startsWith(_proxyBase))
+      return _proxyBase + url;
+    return url;
+  }}
+  // Patch fetch
+  var _fetch = window.fetch;
+  window.fetch = function(input, init) {{
+    if (typeof input === 'string') input = _rw(input);
+    else if (input && input.url) input = new Request(_rw(input.url), input);
+    return _fetch.call(this, input, init);
+  }};
+  // Patch XHR
+  var _open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url) {{
+    arguments[1] = _rw(url);
+    return _open.apply(this, arguments);
+  }};
+  // Patch history
+  var _push = history.pushState.bind(history);
+  history.pushState = function(state, title, url) {{ return _push(state, title, url ? _rw(url) : url); }};
+  var _replace = history.replaceState.bind(history);
+  history.replaceState = function(state, title, url) {{ return _replace(state, title, url ? _rw(url) : url); }};
+  // Patch link clicks (catch dynamic content too)
+  document.addEventListener('click', function(e) {{
+    var el = e.target.closest('a[href]');
+    if (!el) return;
+    var h = el.getAttribute('href');
+    var rw = _rw(h);
+    if (rw !== h) {{ e.preventDefault(); window.location.href = rw; }}
+  }}, true);
+}})();
+</script>"""
+        if "</head>" in text:
+            text = text.replace("</head>", interceptor + "</head>", 1)
+        else:
+            text = interceptor + text
+
         content = text.encode("utf-8")
         resp_headers["content-type"] = "text/html; charset=utf-8"
+
+    # Rewrite Location headers on redirects
+    if "location" in resp_headers:
+        loc = resp_headers["location"]
+        proxy_base = f"/proxy/{scheme}/{ip}/{port}"
+        origin = f"{scheme}://{ip}:{port}"
+        if loc.startswith(origin):
+            resp_headers["location"] = proxy_base + loc[len(origin):]
+        elif loc.startswith("/") and not loc.startswith(proxy_base):
+            resp_headers["location"] = proxy_base + loc
 
     resp_headers.pop("content-length", None)
     return Response(content=content, status_code=resp.status_code,
