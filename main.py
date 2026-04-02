@@ -1,6 +1,7 @@
 """TailScan — FastAPI app."""
 
 import os
+import time
 import logging
 from dotenv import load_dotenv
 load_dotenv()
@@ -20,6 +21,10 @@ import scanner
 import json
 import httpx
 import re
+from pathlib import Path
+
+CACHE_DIR = Path(os.getenv("CACHE_DIR", "/tmp/tailscan-cache"))
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 log = logging.getLogger("tailscan")
 
@@ -116,9 +121,31 @@ def api_disconnect(request: Request):
     return {"ok": True}
 
 
+def _cache_key(exit_node_ip: str, subnets: list) -> str:
+    """Stable filename for a network context."""
+    tag = exit_node_ip.replace(".", "_") + "__" + "_".join(s.replace("/", "-") for s in subnets)
+    return tag
+
+def _load_cache(key: str) -> dict | None:
+    f = CACHE_DIR / f"{key}.json"
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            pass
+    return None
+
+def _save_cache(key: str, data: dict):
+    f = CACHE_DIR / f"{key}.json"
+    try:
+        f.write_text(json.dumps(data))
+    except Exception as e:
+        log.warning(f"Cache write failed: {e}")
+
+
 @app.get("/api/scan")
 def api_scan(request: Request):
-    """SSE stream: emits geo/meta first, then one device per event as discovered."""
+    """SSE stream: emits cached devices immediately, then live scan results."""
     if not get_session(request):
         raise HTTPException(401)
 
@@ -145,6 +172,18 @@ def api_scan(request: Request):
             yield f"data: {json.dumps({'type': 'error', 'message': 'Could not detect LAN subnet. Enable subnet routes on the exit node.'})}\n\n"
             return
 
+        # Emit cached devices immediately so the page shows something right away
+        cache_key = _cache_key(current_exit, subnets)
+        cached = _load_cache(cache_key)
+        if cached and cached.get("devices"):
+            log.info(f"Serving {len(cached['devices'])} cached devices for {cache_key}")
+            for dev in cached["devices"].values():
+                ev = dict(dev, type="cached")
+                yield f"data: {json.dumps(ev)}\n\n"
+            yield f"data: {json.dumps({'type': 'cache_done', 'count': len(cached['devices']), 'scanned_at': cached.get('scanned_at', 0)})}\n\n"
+
+        # Live scan — accumulate results so we can update cache at the end
+        live_devices: dict[str, dict] = {}
         count = 0
         for subnet in subnets:
             log.info(f"Scanning subnet {subnet}")
@@ -154,47 +193,117 @@ def api_scan(request: Request):
                     return
                 device["type"] = "device"
                 count += 1
+                live_devices[device["ip"]] = device
                 log.info(f"Device: {device.get('ip')} ({device.get('hostname')})")
                 yield f"data: {json.dumps(device)}\n\n"
 
         log.info(f"Scan complete: {count} devices")
         yield f"data: {json.dumps({'type': 'done', 'count': count})}\n\n"
 
+        # Persist results to cache (devices without port scan data yet — ports get merged by client)
+        _save_cache(cache_key, {"devices": live_devices, "scanned_at": int(time.time())})
+
     return StreamingResponse(generate(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+@app.get("/api/cache/ports")
+async def api_cache_ports(request: Request):
+    """Save port scan results to cache for a given network key."""
+    if not get_session(request):
+        raise HTTPException(401)
+    current_exit = tailscale.get_current_exit_node()
+    subnets = scanner.detect_lan_subnets(exit_node_ip=current_exit) if current_exit else []
+    if not current_exit or not subnets:
+        return {"ok": False, "reason": "no exit node"}
+    cache_key = _cache_key(current_exit, subnets)
+    return {"ok": True, "key": cache_key}
+
+@app.post("/api/cache/ports")
+async def api_cache_ports_save(request: Request):
+    """Merge client-side port scan results into the cache."""
+    if not get_session(request):
+        raise HTTPException(401)
+    body = await request.json()  # {ip: {open_ports, os_guess}}
+    current_exit = tailscale.get_current_exit_node()
+    subnets = scanner.detect_lan_subnets(exit_node_ip=current_exit) if current_exit else []
+    if not current_exit or not subnets:
+        return {"ok": False}
+    cache_key = _cache_key(current_exit, subnets)
+    cached = _load_cache(cache_key) or {"devices": {}, "scanned_at": int(time.time())}
+    for ip, ports_data in body.items():
+        if ip in cached["devices"]:
+            cached["devices"][ip].update(ports_data)
+        else:
+            cached["devices"][ip] = ports_data
+    _save_cache(cache_key, cached)
+    return {"ok": True}
+
+
 # ─── Proxy ──────────────────────────────────────────────────────────────────
+# URL format: /proxy?t=http://192.168.0.25:8989/path
+# This keeps real-looking URLs in the browser address bar.
+
+def _proxy_url(target_url: str) -> str:
+    """Build the TailScan proxy URL for a given target."""
+    from urllib.parse import quote
+    return f"/proxy?t={quote(target_url, safe=':/?=&')}"
+
+def _rw_url(url: str, origin: str, proxy_prefix: str) -> str:
+    """Rewrite a URL to go through the proxy."""
+    if not url:
+        return url
+    if url.startswith(origin):
+        path = url[len(origin):]
+        return proxy_prefix + (path or "/")
+    if url.startswith("/") and not url.startswith("//"):
+        return proxy_prefix + url
+    return url
+
 
 @app.get("/browse", response_class=HTMLResponse)
 def browse(request: Request, ip: str, port: int = 80):
-    """Redirect straight into the full-page proxy (no iframe)."""
+    """Redirect into the proxy with a clean ?t= URL."""
     if not get_session(request):
         return RedirectResponse("/login")
     scheme = "https" if port in (443, 8443, 8006) else "http"
-    return RedirectResponse(f"/proxy/{scheme}/{ip}/{port}/")
+    from urllib.parse import quote
+    return RedirectResponse(f"/proxy?t={quote(f'{scheme}://{ip}:{port}/', safe=':/?=&')}")
 
 
-@app.api_route("/proxy/{scheme}/{ip}/{port}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
-async def proxy(request: Request, scheme: str, ip: str, port: int, path: str):
-    """Transparent HTTP proxy — runs on the server, so it reaches the LAN via the exit node."""
+@app.api_route("/proxy", methods=["GET", "POST", "PUT", "DELETE"])
+async def proxy(request: Request):
+    """
+    Transparent HTTP proxy via ?t=<target_url>.
+    Browser address bar shows: /proxy?t=http://192.168.0.25:8989/settings
+    """
     if not get_session(request):
         raise HTTPException(401)
-    if scheme not in ("http", "https"):
+
+    from urllib.parse import urlparse, urlencode, parse_qs, quote, unquote
+
+    # Extract target from query string — everything after ?t= (including & params in target)
+    raw_query = str(request.url.query)
+    if not raw_query.startswith("t="):
+        raise HTTPException(400, "Missing ?t= parameter")
+    target_url = unquote(raw_query[2:])
+
+    parsed = urlparse(target_url)
+    if parsed.scheme not in ("http", "https"):
         raise HTTPException(400, "Invalid scheme")
 
-    target_url = f"{scheme}://{ip}:{port}/{path}"
-    if request.url.query:
-        target_url += f"?{request.url.query}"
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    # proxy_prefix: /proxy?t=http://ip:port  (path will be appended)
+    proxy_prefix = f"/proxy?t={quote(origin, safe=':/?=&')}"
 
     headers = {k: v for k, v in request.headers.items()
-               if k.lower() not in ("host", "connection", "transfer-encoding")}
-    headers["host"] = f"{ip}:{port}"
+               if k.lower() not in ("host", "connection", "transfer-encoding", "referer")}
+    headers["host"] = parsed.netloc
 
     body = await request.body()
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=15, follow_redirects=True) as client:
+        async with httpx.AsyncClient(verify=False, timeout=15, follow_redirects=False) as client:
             resp = await client.request(
                 method=request.method,
                 url=target_url,
@@ -208,68 +317,73 @@ async def proxy(request: Request, scheme: str, ip: str, port: int, path: str):
 
     resp_headers = {k: v for k, v in resp.headers.items()
                     if k.lower() not in ("content-encoding", "transfer-encoding",
-                                         "content-security-policy", "x-frame-options")}
+                                         "content-security-policy", "x-frame-options",
+                                         "content-length")}
+
+    # Handle redirects — rewrite Location through proxy
+    if resp.status_code in (301, 302, 303, 307, 308):
+        loc = resp_headers.get("location", "")
+        if loc:
+            # Absolute redirect
+            if loc.startswith("http://") or loc.startswith("https://"):
+                resp_headers["location"] = f"/proxy?t={quote(loc, safe=':/?=&')}"
+            else:
+                # Root-relative redirect
+                new_target = origin + (loc if loc.startswith("/") else "/" + loc)
+                resp_headers["location"] = f"/proxy?t={quote(new_target, safe=':/?=&')}"
+        return Response(content=b"", status_code=resp.status_code, headers=resp_headers)
 
     content_type = resp.headers.get("content-type", "")
     content = resp.content
 
     # Rewrite HTML: fix links + inject JS interceptor for SPA navigation
     if "text/html" in content_type:
-        proxy_base = f"/proxy/{scheme}/{ip}/{port}"
-        origin = f"{scheme}://{ip}:{port}"
         text = content.decode("utf-8", errors="replace")
 
-        # Rewrite root-relative href/src/action="/path" → proxied
+        # Rewrite root-relative href/src/action="/path"
         text = re.sub(
             r'(href|src|action)=(["\'])/(?!/)',
-            lambda m: f'{m.group(1)}={m.group(2)}{proxy_base}/',
+            lambda m: f'{m.group(1)}={m.group(2)}{proxy_prefix}/',
             text
         )
-        # Rewrite absolute origin URLs → proxied
+        # Rewrite absolute origin URLs
         text = re.sub(
             rf'{re.escape(origin)}(/[^"\'> ]*)?',
-            lambda m: f"{proxy_base}{m.group(1) or '/'}",
+            lambda m: f"{proxy_prefix}{m.group(1) or '/'}",
             text
         )
 
-        # Inject JS interceptor before </head> (or at top of body) to handle:
-        # - fetch() / XHR with root-relative or absolute URLs
-        # - window.location / history.pushState navigation
-        # - dynamically inserted <a> / <form> elements
+        # JS interceptor: patches fetch, XHR, history, and link clicks
         interceptor = f"""<script>
 (function() {{
-  var _proxyBase = {repr(proxy_base)};
-  var _origin = {repr(origin)};
+  var _pfx = {json.dumps(proxy_prefix)};
+  var _orig = {json.dumps(origin)};
   function _rw(url) {{
-    if (!url) return url;
-    if (url.startsWith(_origin)) return _proxyBase + url.slice(_origin.length) || _proxyBase + '/';
-    if (url.startsWith('/') && !url.startsWith('//') && !url.startsWith(_proxyBase))
-      return _proxyBase + url;
+    if (!url || typeof url !== 'string') return url;
+    if (url.startsWith(_orig)) return _pfx + (url.slice(_orig.length) || '/');
+    if (url.startsWith('/') && !url.startsWith('//') && !url.startsWith('/proxy'))
+      return _pfx + url;
     return url;
   }}
-  // Patch fetch
   var _fetch = window.fetch;
   window.fetch = function(input, init) {{
     if (typeof input === 'string') input = _rw(input);
-    else if (input && input.url) input = new Request(_rw(input.url), input);
+    else if (input instanceof Request) input = new Request(_rw(input.url), input);
     return _fetch.call(this, input, init);
   }};
-  // Patch XHR
-  var _open = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(method, url) {{
-    arguments[1] = _rw(url);
-    return _open.apply(this, arguments);
+  var _xhrOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(m, url) {{
+    arguments[1] = _rw(url); return _xhrOpen.apply(this, arguments);
   }};
-  // Patch history
   var _push = history.pushState.bind(history);
-  history.pushState = function(state, title, url) {{ return _push(state, title, url ? _rw(url) : url); }};
-  var _replace = history.replaceState.bind(history);
-  history.replaceState = function(state, title, url) {{ return _replace(state, title, url ? _rw(url) : url); }};
-  // Patch link clicks (catch dynamic content too)
+  history.pushState = function(s,t,url) {{ return _push(s,t,url?_rw(url):url); }};
+  var _repl = history.replaceState.bind(history);
+  history.replaceState = function(s,t,url) {{ return _repl(s,t,url?_rw(url):url); }};
   document.addEventListener('click', function(e) {{
     var el = e.target.closest('a[href]');
     if (!el) return;
     var h = el.getAttribute('href');
+    if (!h || h.startsWith('#') || h.startsWith('javascript:')) return;
     var rw = _rw(h);
     if (rw !== h) {{ e.preventDefault(); window.location.href = rw; }}
   }}, true);
@@ -277,23 +391,14 @@ async def proxy(request: Request, scheme: str, ip: str, port: int, path: str):
 </script>"""
         if "</head>" in text:
             text = text.replace("</head>", interceptor + "</head>", 1)
+        elif "<body" in text:
+            text = re.sub(r'(<body[^>]*>)', r'\1' + interceptor, text, count=1)
         else:
             text = interceptor + text
 
         content = text.encode("utf-8")
         resp_headers["content-type"] = "text/html; charset=utf-8"
 
-    # Rewrite Location headers on redirects
-    if "location" in resp_headers:
-        loc = resp_headers["location"]
-        proxy_base = f"/proxy/{scheme}/{ip}/{port}"
-        origin = f"{scheme}://{ip}:{port}"
-        if loc.startswith(origin):
-            resp_headers["location"] = proxy_base + loc[len(origin):]
-        elif loc.startswith("/") and not loc.startswith(proxy_base):
-            resp_headers["location"] = proxy_base + loc
-
-    resp_headers.pop("content-length", None)
     return Response(content=content, status_code=resp.status_code,
                     headers=resp_headers, media_type=content_type)
 
