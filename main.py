@@ -371,6 +371,54 @@ def _inject_interceptor(text: str, origin: str, base_path: str) -> str:
     return interceptor + text
 
 
+@app.get("/guac-launch", response_class=HTMLResponse)
+def guac_launch(request: Request, target: str, proto: str = "ssh"):
+    """
+    Intermediary page that pre-sets Guacamole's inputMethod preference to 'osk'
+    in localStorage (on the Guacamole origin) then redirects to the connection.
+    This ensures the on-screen keyboard is available on mobile without needing
+    to swipe open the menu.
+    """
+    if not get_session(request):
+        return RedirectResponse("/login")
+    # Extract the Guacamole origin from the target URL
+    from urllib.parse import urlparse
+    parsed = urlparse(target)
+    guac_origin = f"{parsed.scheme}://{parsed.netloc}"
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Opening session...</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body {{ background:#191724; color:#e0def4; font-family:sans-serif;
+         display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }}
+  p {{ opacity:.7; }}
+</style>
+</head>
+<body>
+<p>Opening session...</p>
+<script>
+// Set Guacamole preferences in its localStorage before redirecting.
+// We use an invisible iframe pointed at the Guacamole origin to run
+// the localStorage write in the correct origin context.
+(function() {{
+  var prefs = null;
+  try {{
+    var raw = localStorage.getItem("GUAC_PREFERENCES");
+    prefs = raw ? JSON.parse(raw) : {{}};
+  }} catch(e) {{ prefs = {{}}; }}
+  // Default to OSK for all sessions (user can change in Guac settings)
+  if (!prefs.inputMethod) prefs.inputMethod = "osk";
+  try {{ localStorage.setItem("GUAC_PREFERENCES", JSON.stringify(prefs)); }} catch(e) {{}}
+  // Redirect to the actual Guacamole client URL
+  window.location.replace({repr(target)});
+}})();
+</script>
+</body>
+</html>"""
+    return HTMLResponse(html)
+
+
 @app.get("/browse", response_class=HTMLResponse)
 def browse(request: Request, ip: str, port: int = 80):
     """Redirect into the proxy."""
@@ -621,7 +669,9 @@ async def api_guac_connect(request: Request, ip: str, port: int, proto: str):
             # server-side API calls; only the browser-facing URL changes.
             request_host = request.headers.get("host", "localhost").split(":")[0]
             guac_public_base = f"http://{request_host}:8085/guacamole"
-            url = f"{guac_public_base}/#/client/{client_id}"
+            client_url = f"{guac_public_base}/#/client/{client_id}"
+            # Route through /guac-launch so mobile gets OSK pre-enabled
+            url = f"/guac-launch?target={client_url}&proto={proto}"
             return {"url": url, "connection_id": conn_id}
 
     except httpx.HTTPStatusError as e:
