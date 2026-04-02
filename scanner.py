@@ -60,7 +60,8 @@ def detect_lan_subnet(exit_node_ip: str | None = None) -> str | None:
         except Exception:
             pass
 
-    # Fall back to local routing table (works when no exit node, or exit node advertises routes)
+    # Fall back to local routing table — skip Docker/k8s/Tailscale ranges
+    SKIP_IFACES = {"docker0", "br-", "cni", "flannel", "cali", "veth", "tailscale"}
     try:
         result = subprocess.run(
             ["ip", "route"],
@@ -75,7 +76,17 @@ def detect_lan_subnet(exit_node_ip: str | None = None) -> str | None:
                 continue
             if subnet.startswith("100.") or subnet.startswith("127."):
                 continue
-            if "/" in subnet and any(subnet.startswith(p) for p in ("10.", "172.", "192.168.")):
+            # Skip Docker/k8s bridge subnets (172.16-31 used by Docker by default)
+            if subnet.startswith("172."):
+                continue
+            # Check the dev interface if present
+            if "dev" in parts:
+                dev_idx = parts.index("dev") + 1
+                if dev_idx < len(parts):
+                    dev = parts[dev_idx]
+                    if any(dev.startswith(skip) for skip in SKIP_IFACES):
+                        continue
+            if "/" in subnet and any(subnet.startswith(p) for p in ("10.", "192.168.")):
                 return subnet
         return None
     except Exception:
@@ -83,20 +94,49 @@ def detect_lan_subnet(exit_node_ip: str | None = None) -> str | None:
 
 
 def scan_lan(subnet: str) -> list[dict]:
-    """Run nmap ping sweep on subnet. Returns list of discovered devices."""
+    """
+    Two-phase scan:
+    1. Fast ping sweep to discover live hosts
+    2. Quick top-20 port scan + OS detection on each live host
+    """
     try:
+        # Phase 1: ping sweep, fast timing
         result = subprocess.run(
-            ["nmap", "-sn", "--send-ip", "-oX", "-", subnet],
-            capture_output=True, text=True, timeout=120
+            ["nmap", "-sn", "-T4", "--send-ip", "-oX", "-", subnet],
+            capture_output=True, text=True, timeout=60
         )
         if result.returncode != 0:
-            # Fallback without --send-ip
             result = subprocess.run(
-                ["nmap", "-sn", "-oX", "-", subnet],
-                capture_output=True, text=True, timeout=120
+                ["nmap", "-sn", "-T4", "-oX", "-", subnet],
+                capture_output=True, text=True, timeout=60
             )
 
-        return _parse_nmap_xml(result.stdout)
+        devices = _parse_nmap_xml(result.stdout)
+
+        if not devices:
+            return devices
+
+        # Phase 2: port scan live hosts (top 20 common ports, OS detection)
+        live_ips = [d["ip"] for d in devices if d.get("ip")]
+        if live_ips:
+            port_result = subprocess.run(
+                ["nmap", "-T4", "--top-ports", "20", "-O", "--osscan-limit",
+                 "-oX", "-", "--send-ip"] + live_ips,
+                capture_output=True, text=True, timeout=120
+            )
+            if port_result.returncode != 0:
+                port_result = subprocess.run(
+                    ["nmap", "-T4", "--top-ports", "20", "-O", "--osscan-limit",
+                     "-oX", "-"] + live_ips,
+                    capture_output=True, text=True, timeout=120
+                )
+            port_data = _parse_nmap_ports_xml(port_result.stdout)
+            # Merge port data into devices
+            for device in devices:
+                extra = port_data.get(device["ip"], {})
+                device.update(extra)
+
+        return devices
     except FileNotFoundError:
         return [{"error": "nmap not found — run start.sh to install"}]
     except subprocess.TimeoutExpired:
@@ -167,3 +207,66 @@ def _parse_nmap_xml(xml_output: str) -> list[dict]:
 
     devices.sort(key=ip_sort_key)
     return devices
+
+
+def _parse_nmap_ports_xml(xml_output: str) -> dict:
+    """Parse nmap port scan XML. Returns dict keyed by IP."""
+    result = {}
+    try:
+        root = ET.fromstring(xml_output)
+        for host in root.findall("host"):
+            ip = ""
+            for addr in host.findall("address"):
+                if addr.get("addrtype") == "ipv4":
+                    ip = addr.get("addr", "")
+            if not ip:
+                continue
+
+            # Open ports
+            open_ports = []
+            ports_el = host.find("ports")
+            if ports_el is not None:
+                for port_el in ports_el.findall("port"):
+                    state_el = port_el.find("state")
+                    if state_el is None or state_el.get("state") != "open":
+                        continue
+                    portid = port_el.get("portid", "")
+                    proto = port_el.get("protocol", "tcp")
+                    service_el = port_el.find("service")
+                    svc_name = ""
+                    svc_product = ""
+                    svc_version = ""
+                    if service_el is not None:
+                        svc_name = service_el.get("name", "")
+                        svc_product = service_el.get("product", "")
+                        svc_version = service_el.get("version", "")
+                    label = svc_name or portid
+                    if svc_product:
+                        label += f" ({svc_product}"
+                        if svc_version:
+                            label += f" {svc_version}"
+                        label += ")"
+                    open_ports.append({
+                        "port": int(portid),
+                        "proto": proto,
+                        "service": label,
+                    })
+
+            # OS detection
+            os_guess = ""
+            os_el = host.find("os")
+            if os_el is not None:
+                matches = os_el.findall("osmatch")
+                if matches:
+                    best = max(matches, key=lambda m: int(m.get("accuracy", "0")))
+                    accuracy = best.get("accuracy", "")
+                    name = best.get("name", "")
+                    os_guess = f"{name} ({accuracy}%)" if accuracy else name
+
+            result[ip] = {
+                "open_ports": open_ports,
+                "os_guess": os_guess or "Unknown",
+            }
+    except ET.ParseError:
+        pass
+    return result
