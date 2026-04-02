@@ -235,7 +235,8 @@
 let currentExitNode = null;
 let refreshInterval = null;
 let countdownInterval = null;
-let countdown = 30;
+let countdown = 60;
+let portRescanTimer = null;
 
 // ── Peers ────────────────────────────────────────────────────────────────────
 
@@ -376,6 +377,7 @@ function ensureScanUI() {
 
 function runScan() {
   if (activeScanSource) { activeScanSource.close(); activeScanSource = null; }
+  if (portRescanTimer) { clearTimeout(portRescanTimer); portRescanTimer = null; }
   stopAutoRefresh();
   ensureScanUI();
 
@@ -469,7 +471,7 @@ function runScan() {
       const bar = document.getElementById('scan-bar');
       if (bar) bar.innerHTML = `
         <span style="color:var(--green);">✓ Scan complete</span>
-        <span style="color:var(--muted);margin-left:8px;">Next in <span id="countdown">30</span>s</span>
+        <span style="color:var(--muted);margin-left:8px;">Next in <span id="countdown">60</span>s</span>
         <span style="flex:1"></span>
         <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Scan now</button>`;
       const title = document.getElementById('device-card-title');
@@ -487,6 +489,9 @@ function runScan() {
         portScanQueue.push(...newIPs);
         drainPortScanQueue();
       }
+
+      // Schedule silent port rescan of all known devices in 300s
+      schedulePortRescan();
     }
   };
 
@@ -577,6 +582,24 @@ async function portScan(ip) {
   }
 }
 
+// ── Silent port rescan ───────────────────────────────────────────────────────
+
+function schedulePortRescan() {
+  if (portRescanTimer) clearTimeout(portRescanTimer);
+  portRescanTimer = setTimeout(async () => {
+    portRescanTimer = null;
+    const ips = Object.keys(knownDevices);
+    if (!ips.length) return;
+    // Queue all known IPs for a silent rescan (don't show spinner — just update chips in place)
+    for (const ip of ips) {
+      portScanQueue.push(ip);
+    }
+    await drainPortScanQueue();
+    // Schedule next rescan
+    schedulePortRescan();
+  }, 300_000);
+}
+
 // ── Toggle empty rows ────────────────────────────────────────────────────────
 
 function toggleEmpty() {
@@ -588,7 +611,7 @@ function toggleEmpty() {
 
 function startAutoRefresh() {
   stopAutoRefresh();
-  countdown = 30;
+  countdown = 60;
   countdownInterval = setInterval(() => {
     countdown--;
     const el = document.getElementById('countdown');
@@ -602,9 +625,9 @@ function stopAutoRefresh() {
 }
 
 function resetCountdown() {
-  countdown = 30;
+  countdown = 60;
   const el = document.getElementById('countdown');
-  if (el) el.textContent = 30;
+  if (el) el.textContent = 60;
   startAutoRefresh();
 }
 
