@@ -222,6 +222,9 @@
     <div class="sidebar-list" id="peer-list">
       <div style="padding:20px; text-align:center; color:var(--muted);"><div class="spinner"></div></div>
     </div>
+    <div id="version-badge" style="padding:10px 14px; font-size:10px; color:var(--muted); border-top:1px solid var(--border); text-align:center;">
+      TailScan <span id="version-str">...</span>
+    </div>
   </div>
 
   <!-- Main -->
@@ -737,6 +740,13 @@ function showError(msg) {
       <p>${escHtml(msg)}</p>
     </div>`;
 }
+
+// ── Version ───────────────────────────────────────────────────────────────────
+
+fetch('/api/version').then(r=>r.json()).then(d=>{
+  const el = document.getElementById('version-str');
+  if (el) el.textContent = 'v' + d.version;
+}).catch(()=>{});
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
