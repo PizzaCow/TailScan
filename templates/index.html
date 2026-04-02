@@ -4,965 +4,347 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TailScan</title>
-<style>
-  /* ── Default theme: Dark Slate ─────────────────────────────── */
-  :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface2: #222636;
-    --border: #2d3148;
-    --text: #e2e8f0;
-    --muted: #7c85a2;
-    --accent: #5b6ee8;
-    --accent-hover: #4a5cd6;
-    --green: #22c55e;
-    --red: #ef4444;
-    --yellow: #f59e0b;
-    --exit-badge: #7c3aed;
-    --guac-green: #22c55e;
-  }
 
-  /* ── Rose Pine theme ────────────────────────────────────────── */
-  body.theme-rosepine {
-    --bg: #191724;
-    --surface: #1f1d2e;
-    --surface2: #26233a;
-    --border: #403d52;
-    --text: #e0def4;
-    --muted: #6e6a86;
-    --accent: #c4a7e7;
-    --accent-hover: #ebbcba;
-    --green: #9ccfd8;
-    --red: #eb6f92;
-    --yellow: #f6c177;
-    --exit-badge: #c4a7e7;
-    --guac-green: #9ccfd8;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+<!-- Shoelace dark theme + web components -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.16.0/cdn/themes/dark.css">
+<script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.16.0/cdn/shoelace-autoloader.js"></script>
 
-  /* Top bar */
-  .topbar {
-    display: flex; align-items: center; gap: 12px;
-    padding: 0 20px; height: 52px;
-    background: var(--surface); border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  .topbar .logo { font-weight: 700; font-size: 16px; color: var(--accent); letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: opacity 0.15s; }
-  .topbar .logo:hover { opacity: 0.75; }
-  .topbar .spacer { flex: 1; }
-  .topbar .exit-status {
-    display: flex; align-items: center; gap: 8px;
-    font-size: 13px; color: var(--muted);
-  }
-  .topbar .exit-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
-  .topbar .exit-status .dot.connected { background: var(--green); }
-  .topbar .exit-name { color: var(--text); font-weight: 500; }
-  .btn {
-    padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer;
-    font-size: 13px; font-weight: 500; transition: background 0.15s;
-  }
-  .btn-primary { background: var(--accent); color: white; }
-  .btn-primary:hover { background: var(--accent-hover); }
-  .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
-  .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
-  .btn-danger { background: transparent; color: var(--red); border: 1px solid var(--border); }
-  .btn-danger:hover { background: rgba(239,68,68,0.1); }
-
-  /* Layout */
-  .layout { display: flex; flex: 1; overflow: hidden; }
-
-  /* Sidebar */
-  .sidebar {
-    width: 280px; flex-shrink: 0;
-    background: var(--surface); border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; overflow: hidden;
-  }
-  .sidebar-header {
-    padding: 14px 16px 10px;
-    border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between;
-  }
-  .sidebar-header h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); }
-  .sidebar-list { overflow-y: auto; flex: 1; padding: 8px; }
-  .peer-item {
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 10px; border-radius: 8px; cursor: pointer;
-    transition: background 0.12s; margin-bottom: 2px;
-  }
-  .peer-item:hover { background: var(--surface2); }
-  .peer-item.active-exit { background: rgba(91,110,232,0.15); border: 1px solid rgba(91,110,232,0.3); }
-  .peer-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--red); }
-  .peer-dot.online { background: var(--green); }
-  .peer-info { flex: 1; min-width: 0; }
-  .peer-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .peer-ip { font-size: 11px; color: var(--muted); font-family: monospace; }
-  .peer-badges { display: flex; gap: 4px; margin-top: 2px; flex-wrap: wrap; }
-  .badge {
-    font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600;
-  }
-  .badge-exit { background: rgba(124,58,237,0.2); color: #a78bfa; border: 1px solid rgba(124,58,237,0.3); }
-  .badge-self { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
-  .badge-os { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
-  .section-label {
-    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px;
-    color: var(--muted); padding: 8px 10px 4px; margin-top: 4px;
-  }
-
-  /* Main content */
-  .main { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
-
-  /* Cards */
-  .card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-    padding: 20px;
-  }
-  .card-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted); margin-bottom: 16px; }
-
-  /* Geo info */
-  .geo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
-  .geo-item label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 3px; }
-  .geo-item .value { font-size: 14px; font-weight: 500; }
-  .geo-item .value.ip { font-family: monospace; font-size: 15px; color: var(--accent); }
-
-  /* Device table */
-  .table-wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th {
-    text-align: left; padding: 8px 12px;
-    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px;
-    color: var(--muted); border-bottom: 1px solid var(--border);
-  }
-  td { padding: 8px 12px; border-bottom: 1px solid rgba(45,49,72,0.5); vertical-align: middle; }
-  tr:last-child td { border-bottom: none; }
-  tr.device-row:hover td { background: var(--surface2); }
-  .status-up { color: var(--green); font-weight: 600; }
-  .ip-cell { font-family: monospace; color: var(--accent); white-space: nowrap; }
-
-  /* Hide empty rows (default on) — only after port scan has completed */
-  tr.no-ports:not(.scanning) { display: none; }
-  body.show-empty tr.no-ports { display: table-row; }
-  tr.cached-row td { color: #c4a7e7; }
-  tr.cached-row .port-chip { border-color: #c4a7e7; color: #c4a7e7; }
-  tr.cached-row a.port-chip { color: #c4a7e7; }
-
-  /* Port chips */
-  .port-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-  .port-chip {
-    position: relative;
-    font-size: 11px; font-family: monospace; font-weight: 600;
-    padding: 2px 7px; border-radius: 4px;
-    background: rgba(91,110,232,0.15); color: #a5b4fc;
-    border: 1px solid rgba(91,110,232,0.25);
-    cursor: pointer; white-space: nowrap; user-select: none;
-    text-decoration: none; display: inline-block;
-  }
-  .port-chip:hover { background: rgba(91,110,232,0.35); border-color: rgba(91,110,232,0.5); color: #c7d2fe; }
-  .port-chip.no-browse { cursor: default; }
-  .port-chip.no-browse:hover { background: rgba(91,110,232,0.15); border-color: rgba(91,110,232,0.25); color: #a5b4fc; }
-  /* Guacamole-connectable ports (green) */
-  .port-chip.guac-chip {
-    background: rgba(34,197,94,0.12); color: #4ade80;
-    border: 1px solid rgba(34,197,94,0.3);
-  }
-  .port-chip.guac-chip:hover { background: rgba(34,197,94,0.28); border-color: rgba(34,197,94,0.55); color: #86efac; }
-  body.theme-rosepine .port-chip.guac-chip {
-    background: rgba(156,207,216,0.12); color: #9ccfd8;
-    border: 1px solid rgba(156,207,216,0.3);
-  }
-  body.theme-rosepine .port-chip.guac-chip:hover { background: rgba(156,207,216,0.28); border-color: rgba(156,207,216,0.55); color: #c8e8ec; }
-
-  /* Copyparty / file transfer ports (orange) */
-  .port-chip.copyparty-chip {
-    background: rgba(249,115,22,0.13); color: #fb923c;
-    border: 1px solid rgba(249,115,22,0.3);
-  }
-  .port-chip.copyparty-chip:hover { background: rgba(249,115,22,0.28); border-color: rgba(249,115,22,0.55); color: #fdba74; }
-  body.theme-rosepine .port-chip.copyparty-chip {
-    background: rgba(246,193,119,0.13); color: #f6c177;
-    border: 1px solid rgba(246,193,119,0.3);
-  }
-  body.theme-rosepine .port-chip.copyparty-chip:hover { background: rgba(246,193,119,0.28); border-color: rgba(246,193,119,0.55); color: #f9d89a; }
-
-  /* Custom tooltip */
-  .port-chip .chip-tip {
-    display: none;
-    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
-    background: #2a2d3e; color: #e2e8f0; font-size: 11px; font-family: -apple-system, sans-serif;
-    font-weight: 500; white-space: nowrap; padding: 5px 9px; border-radius: 6px;
-    border: 1px solid #3d4166; pointer-events: none; z-index: 100;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-  }
-  .port-chip .chip-tip::after {
-    content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
-    border: 5px solid transparent; border-top-color: #3d4166;
-  }
-  .port-chip:hover .chip-tip { display: block; }
-
-  .ports-scanning {
-    font-size: 11px; color: var(--muted);
-    display: flex; align-items: center; gap: 6px;
-  }
-  .spinner-sm {
-    display: inline-block; width: 10px; height: 10px;
-    border: 1.5px solid var(--border); border-top-color: var(--accent);
-    border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0;
-  }
-
-  /* Empty / loading states */
-  .empty-state {
-    text-align: center; padding: 48px 24px; color: var(--muted);
-  }
-  .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
-  .empty-state p { font-size: 14px; }
-  .spinner {
-    display: inline-block; width: 20px; height: 20px;
-    border: 2px solid var(--border); border-top-color: var(--accent);
-    border-radius: 50%; animation: spin 0.7s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* Refresh bar */
-  .refresh-bar {
-    display: flex; align-items: center; gap: 10px;
-    font-size: 12px; color: var(--muted);
-  }
-  .refresh-bar .countdown { font-weight: 600; color: var(--text); min-width: 20px; }
-
-  /* Disconnect prompt */
-  #no-exit-msg {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    flex: 1; text-align: center; gap: 12px; color: var(--muted);
-  }
-  #no-exit-msg h2 { font-size: 18px; color: var(--text); }
-  #no-exit-msg p { font-size: 14px; max-width: 320px; }
-</style>
-</head>
-<body>
-
-<!-- Top bar -->
-<div class="topbar">
-  <span class="logo" onclick="cycleTheme()" title="Click to change theme">🔍 TailScan</span>
-  <div class="exit-status">
-    <div class="dot" id="exit-dot"></div>
-    <span id="exit-label">Not connected to exit node</span>
-  </div>
-  <div class="spacer"></div>
-  <button class="btn btn-danger" id="disconnect-btn" style="display:none" onclick="disconnectExit()">Disconnect</button>
-  <button class="btn btn-ghost" id="toggle-empty-btn" onclick="toggleEmpty()" style="display:none">Show all</button>
-  <a href="/logout"><button class="btn btn-ghost">Logout</button></a>
-</div>
-
-<!-- Layout -->
-<div class="layout">
-
-  <!-- Sidebar -->
-  <div class="sidebar">
-    <div class="sidebar-header">
-      <h2>Tailnet Devices</h2>
-      <button class="btn btn-ghost" onclick="loadPeers()" style="padding:4px 8px; font-size:11px;">↺</button>
-    </div>
-    <div class="sidebar-list" id="peer-list">
-      <div style="padding:20px; text-align:center; color:var(--muted);"><div class="spinner"></div></div>
-    </div>
-    <div id="version-badge" style="padding:10px 14px; font-size:10px; color:var(--muted); border-top:1px solid var(--border); text-align:center;">
-      TailScan <span id="version-str">...</span>
-    </div>
-  </div>
-
-  <!-- Main -->
-  <div class="main" id="main-content">
-    <div id="no-exit-msg">
-      <div style="font-size:56px;">🛰️</div>
-      <h2>Select an Exit Node</h2>
-      <p>Click an exit node on the left to connect and scan its LAN.</p>
-    </div>
-  </div>
-
-</div>
-
-<script>
-let currentExitNode = null;
-let refreshInterval = null;
-let countdownInterval = null;
-let countdown = 60;
-let portRescanTimer = null;
-
-// ── Peers ────────────────────────────────────────────────────────────────────
-
-async function loadPeers() {
-  const list = document.getElementById('peer-list');
-  list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)"><div class="spinner"></div></div>';
-  try {
-    const r = await fetch('/api/peers');
-    const d = await r.json();
-    currentExitNode = d.current_exit_node;
-    updateTopbar(currentExitNode, d.peers);
-    renderPeers(d.peers, d.current_exit_node);
-  } catch(e) {
-    list.innerHTML = '<div style="padding:16px;color:var(--red);font-size:13px;">Failed to load peers</div>';
-  }
-}
-
-function renderPeers(peers, activeExit) {
-  const list = document.getElementById('peer-list');
-  const exitNodes = peers.filter(p => p.exit_node_option && !p.self);
-  const others = peers.filter(p => !p.exit_node_option || p.self);
-
-  let html = '';
-
-  if (exitNodes.length) {
-    html += '<div class="section-label">Exit Nodes</div>';
-    for (const p of exitNodes) {
-      const isActive = p.exit_node || p.ip === activeExit;
-      html += peerHTML(p, isActive, true);
-    }
-  }
-
-  if (others.length) {
-    html += '<div class="section-label">Devices</div>';
-    for (const p of others) {
-      html += peerHTML(p, false, false);
-    }
-  }
-
-  list.innerHTML = html || '<div style="padding:16px;color:var(--muted);font-size:13px;">No devices found</div>';
-}
-
-function peerHTML(p, isActive, isExitNode) {
-  const onclick = isExitNode && !p.self ? `onclick="connectExit('${p.ip}', '${p.hostname}')"` : '';
-  const cursor = isExitNode && !p.self ? '' : 'cursor:default;';
-  return `
-    <div class="peer-item ${isActive ? 'active-exit' : ''}" ${onclick} style="${cursor}">
-      <div class="peer-dot ${p.online ? 'online' : ''}"></div>
-      <div class="peer-info">
-        <div class="peer-name">${escHtml(p.hostname)}</div>
-        <div class="peer-ip">${p.ip}</div>
-        <div class="peer-badges">
-          ${p.self ? '<span class="badge badge-self">this device</span>' : ''}
-          ${isExitNode ? '<span class="badge badge-exit">exit node</span>' : ''}
-          ${p.os ? `<span class="badge badge-os">${escHtml(p.os)}</span>` : ''}
-        </div>
-      </div>
-    </div>`;
-}
-
-// ── Exit node control ────────────────────────────────────────────────────────
-
-async function connectExit(ip, hostname) {
-  showLoading(`Connecting to ${hostname}...`);
-  try {
-    await fetch('/api/exit-node/set', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ip})
-    });
-    currentExitNode = ip;
-    updateTopbar(ip, null, hostname);
-    await loadPeers();
-    startAutoRefresh();
-    await runScan();
-  } catch(e) {
-    showError('Failed to connect to exit node.');
-  }
-}
-
-async function disconnectExit() {
-  stopAutoRefresh();
-  await fetch('/api/exit-node/disconnect', {method: 'POST'});
-  currentExitNode = null;
-  updateTopbar(null);
-  await loadPeers();
-  document.getElementById('main-content').innerHTML = `
-    <div id="no-exit-msg">
-      <div style="font-size:56px;">🛰️</div>
-      <h2>Select an Exit Node</h2>
-      <p>Click an exit node on the left to connect and scan its LAN.</p>
-    </div>`;
-}
-
-// ── Scan ─────────────────────────────────────────────────────────────────────
-
-let activeScanSource = null;
-let knownDevices = {};        // ip -> device data
-let portScanQueue = [];       // IPs queued for auto port scan
-let portScanRunning = false;  // only one at a time
-
-function isFirstScan() {
-  return Object.keys(knownDevices).length === 0;
-}
-
-function ensureScanUI() {
-  // Build scaffold once; on subsequent scans just update status
-  if (!document.getElementById('scan-wrap')) {
-    document.getElementById('main-content').innerHTML = `
-      <div id="scan-wrap">
-        <div class="refresh-bar" style="margin-bottom:12px;" id="scan-bar">
-          <div class="spinner"></div>
-          <span id="scan-status">Connecting...</span>
-          <span style="flex:1"></span>
-          <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Restart</button>
-        </div>
-        <div id="geo-card"></div>
-        <div id="device-card" class="card" style="display:none">
-          <div class="card-title" id="device-card-title">LAN Devices</div>
-          <div class="table-wrap"><table>
-            <thead><tr>
-              <th>IP</th><th>Status</th><th>Open Ports</th>
-            </tr></thead>
-            <tbody id="device-tbody"></tbody>
-          </table></div>
-        </div>
-      </div>`;
-  } else {
-    // Just reset the status bar
-    const bar = document.getElementById('scan-bar');
-    if (bar) bar.innerHTML = `
-      <div class="spinner"></div>
-      <span id="scan-status">Refreshing...</span>
-      <span style="flex:1"></span>
-      <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Restart</button>`;
-  }
-}
-
-function runScan() {
-  if (activeScanSource) { activeScanSource.close(); activeScanSource = null; }
-  if (portRescanTimer) { clearTimeout(portRescanTimer); portRescanTimer = null; }
-  stopAutoRefresh();
-  ensureScanUI();
-
-  let seenIPs = new Set();  // IPs found in this scan cycle
-
-  const src = new EventSource('/api/scan');
-  activeScanSource = src;
-
-  src.onmessage = (e) => {
-    const d = JSON.parse(e.data);
-
-    if (d.type === 'meta') {
-      if (!d.connected) {
-        document.getElementById('main-content').innerHTML = `
-          <div id="no-exit-msg"><div style="font-size:56px;">🛰️</div><h2>Not Connected</h2>
-          <p>Select an exit node from the sidebar.</p></div>`;
-        knownDevices = {};
-        src.close(); return;
-      }
-      const geo = d.geo || {};
-      document.getElementById('geo-card').innerHTML = `
-        <div class="card" style="margin-bottom:20px;">
-          <div class="card-title">WAN & Location</div>
-          <div class="geo-grid">
-            <div class="geo-item"><label>WAN IP</label><div class="value ip">${escHtml(geo.ip||'—')}</div></div>
-            <div class="geo-item"><label>City</label><div class="value">${escHtml(geo.city||'—')}</div></div>
-            <div class="geo-item"><label>Region</label><div class="value">${escHtml(geo.region||'—')}</div></div>
-            <div class="geo-item"><label>Country</label><div class="value">${escHtml(geo.country||'—')}</div></div>
-            <div class="geo-item"><label>ISP</label><div class="value">${escHtml(geo.isp||'—')}</div></div>
-            <div class="geo-item"><label>Timezone</label><div class="value">${escHtml(geo.timezone||'—')}</div></div>
-          </div>
-        </div>`;
-      const status = document.getElementById('scan-status');
-      if (status) status.textContent = `Scanning ${d.subnet}...`;
-      document.getElementById('device-card').style.display = '';
-      document.getElementById('device-card-title').textContent =
-        `LAN Devices — ${d.subnet} (scanning...)`;
-    }
-
-    else if (d.type === 'cached') {
-      // Cached device from a previous scan — show immediately with cached port data
-      const isNew = !knownDevices[d.ip];
-      knownDevices[d.ip] = d;
-      const key = d.ip.replace(/\./g, '-');
-      const tbody = document.getElementById('device-tbody');
-      if (isNew) {
-        const row = document.createElement('tr');
-        row.id = `row-${key}`;
-        row.className = 'device-row scanning cached-row';
-        row.innerHTML = deviceRowHTML(d);
-        const rows = tbody.querySelectorAll('tr[id^="row-"]');
-        let inserted = false;
-        for (const r of rows) {
-          const rip = r.id.replace('row-','').replace(/-/g,'.');
-          if (ipNum(d.ip) < ipNum(rip)) { tbody.insertBefore(row, r); inserted = true; break; }
-        }
-        if (!inserted) tbody.appendChild(row);
-      }
-      // If cached device has port data, render it now instead of spinning
-      if (d.open_ports) {
-        renderPortsFromCache(d.ip, d.open_ports);
-      } else {
-        portScanQueue.push(d.ip);
-        drainPortScanQueue();
-      }
-      const title = document.getElementById('device-card-title');
-      if (title) title.textContent = `LAN Devices — ${Object.keys(knownDevices).length} (cached)`;
-    }
-
-    else if (d.type === 'cache_done') {
-      const ago = d.scanned_at ? Math.round((Date.now()/1000 - d.scanned_at) / 60) : null;
-      const agoStr = ago !== null ? ` · cached ${ago}m ago` : '';
-      const bar = document.getElementById('scan-bar');
-      if (bar) bar.innerHTML = `
-        <span style="color:var(--muted);">📦 Showing cached results${agoStr} · live scan in progress...</span>`;
-    }
-
-    else if (d.type === 'device') {
-      seenIPs.add(d.ip);
-      const isNew = !knownDevices[d.ip];
-      // Clear cached marker on this row if present
-      const key = d.ip.replace(/\./g, '-');
-      const existingRow = document.getElementById(`row-${key}`);
-      if (existingRow) existingRow.classList.remove('cached-row');
-
-      knownDevices[d.ip] = d;
-      const tbody = document.getElementById('device-tbody');
-
-      if (isNew) {
-        const row = document.createElement('tr');
-        row.id = `row-${key}`;
-        row.className = 'device-row scanning';
-        row.innerHTML = deviceRowHTML(d);
-        const rows = tbody.querySelectorAll('tr[id^="row-"]');
-        let inserted = false;
-        for (const r of rows) {
-          const rip = r.id.replace('row-','').replace(/-/g,'.');
-          if (ipNum(d.ip) < ipNum(rip)) { tbody.insertBefore(row, r); inserted = true; break; }
-        }
-        if (!inserted) tbody.appendChild(row);
-        portScanQueue.push(d.ip);
-        drainPortScanQueue();
-      }
-      const title = document.getElementById('device-card-title');
-      if (title) title.textContent =
-        `LAN Devices — scanning... (${Object.keys(knownDevices).length} found)`;
-    }
-
-    else if (d.type === 'error') {
-      const status = document.getElementById('scan-status');
-      if (status) status.innerHTML = `<span style="color:var(--red)">⚠ ${escHtml(d.message)}</span>`;
-      src.close();
-    }
-
-    else if (d.type === 'done') {
-      src.close();
-      activeScanSource = null;
-
-      // Remove rows for IPs that disappeared since last scan
-      for (const ip of Object.keys(knownDevices)) {
-        if (!seenIPs.has(ip)) {
-          const key = ip.replace(/\./g, '-');
-          document.getElementById(`row-${key}`)?.remove();
-          delete knownDevices[ip];
-        }
-      }
-
-      const bar = document.getElementById('scan-bar');
-      if (bar) bar.innerHTML = `
-        <span style="color:var(--green);">✓ Scan complete</span>
-        <span style="color:var(--muted);margin-left:8px;">Next in <span id="countdown">60</span>s</span>
-        <span style="flex:1"></span>
-        <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Scan now</button>`;
-      const title = document.getElementById('device-card-title');
-      if (title) title.textContent = `LAN Devices — ${d.count} found`;
-
-      resetCountdown();
-      schedulePortRescan();
-    }
-  };
-
-  src.onerror = () => {
-    src.close();
-    activeScanSource = null;
-    const status = document.getElementById('scan-status');
-    if (status) status.innerHTML = `<span style="color:var(--red)">Connection lost</span>`;
-  };
-}
-
-function deviceRowHTML(d) {
-  const key = d.ip.replace(/\./g, '-');
-  return `
-    <td class="ip-cell">${escHtml(d.ip)}</td>
-    <td class="status-up">●&nbsp;up</td>
-    <td id="ports-inline-${key}">
-      <div class="ports-scanning"><div class="spinner-sm"></div><span>queued</span></div>
-    </td>`;
-}
-
-function renderPortsFromCache(ip, open_ports) {
-  const key = ip.replace(/\./g, '-');
-  const cell = document.getElementById(`ports-inline-${key}`);
-  const row = document.getElementById(`row-${key}`);
-  if (!cell) return;
-  if (!row) return;
-  row.classList.remove('scanning');
-  if (!open_ports || open_ports.length === 0) {
-    cell.innerHTML = `<span style="color:var(--muted);font-size:11px;">—</span>`;
-    row.classList.add('no-ports');
-    document.getElementById('toggle-empty-btn').style.display = '';
-  } else {
-    row.classList.remove('no-ports');
-    cell.innerHTML = `<div class="port-chips">${buildChips(ip, open_ports)}</div>`;
-  }
-}
-
-const BROWSABLE_PORTS = new Set([
-  80, 443, 8080, 8081, 8082, 8090, 8443, 8006, 8007,
-  8123, 8888, 5000, 5001, 8001, 32400, 10000, 9090, 9091,
-  3000, 3001, 4000, 4200, 7000, 7001, 8096, 8097, 8920,
-  7878, 8989, 8686, 9696, 8787, 5055, 5299, 9117, 9443,
-  1880, 9000, 9393, 9999, 4040, 8200
-]);
-
-// Copyparty file server ports (orange + browsable)
-const COPYPARTY_PORTS = new Set([3923, 30266]);
-
-// File transfer protocol ports — shown in orange (not web-browsable)
-const FILE_PROTO_PORTS = new Set([21, 873, 2049, 445, 548]);
-const FILE_PROTO_LABELS = {
-  21: 'FTP', 873: 'rsync', 2049: 'NFS', 445: 'SMB', 548: 'AFP'
-};
-
-// Ports that open in Guacamole (green chips)
-const GUAC_PORTS = new Set([22, 3389, 5900, 5901, 5902, 5903]);
-const GUAC_PROTOCOLS = {22: 'ssh', 3389: 'rdp', 5900: 'vnc', 5901: 'vnc', 5902: 'vnc', 5903: 'vnc'};
-// Guacamole is running on the same host as TailScan
-const GUAC_URL = 'http://100.99.195.16:8085/guacamole';
-
-function buildChips(ip, ports) {
-  return ports.map(p => {
-    const isGuac = GUAC_PORTS.has(p.port);
-    const isCopyparty = COPYPARTY_PORTS.has(p.port);
-    const isFileProt = FILE_PROTO_PORTS.has(p.port);
-    const isBrowsable = BROWSABLE_PORTS.has(p.port);
-
-    if (isGuac) {
-      const proto = GUAC_PROTOCOLS[p.port];
-      const tip = `${escHtml(p.service)} — open in Guacamole (${proto.toUpperCase()})`;
-      return `<span class="port-chip guac-chip" onclick="openGuac('${ip}', ${p.port}, '${proto}')" title="${tip}">${p.port}<span class="chip-tip">${tip}</span></span>`;
-
-    } else if (isCopyparty) {
-      const proxyUrl = `/proxy?t=${encodeURIComponent(`http://${ip}:${p.port}/`)}`;
-      const tip = `Copyparty file server — click to browse`;
-      return `<span class="port-chip copyparty-chip" onclick="tsOpen(${JSON.stringify(proxyUrl)}, ${JSON.stringify(`Copyparty ${ip}:${p.port}`)}, 'web')" style="cursor:pointer">${p.port}<span class="chip-tip">${tip}</span></span>`;
-
-    } else if (isFileProt) {
-      const label = FILE_PROTO_LABELS[p.port] || escHtml(p.service);
-      const proto = p.port === 445 ? 'smb' : (p.port === 21 ? 'ftp' : null);
-      if (proto) {
-        const tip = `${label} — click to browse files`;
-        return `<span class="port-chip copyparty-chip" onclick="openFileBrowser('${ip}', ${p.port}, '${proto}')" style="cursor:pointer">${p.port}<span class="chip-tip">${tip}</span></span>`;
-      }
-      const tip = `${label} — file transfer protocol`;
-      return `<span class="port-chip copyparty-chip no-browse">${p.port}<span class="chip-tip">${tip}</span></span>`;
-
-    } else if (isBrowsable) {
-      const scheme = [443, 8443, 8006].includes(p.port) ? 'https' : 'http';
-      const proxyUrl = `/proxy?t=${encodeURIComponent(`${scheme}://${ip}:${p.port}/`)}`;
-      const tip = `${escHtml(p.service)} — click to browse`;
-      return `<span class="port-chip" onclick="tsOpen(${JSON.stringify(proxyUrl)}, ${JSON.stringify(`${p.service||'Web'} ${ip}:${p.port}`)}, 'web')" style="cursor:pointer">${p.port}<span class="chip-tip">${tip}</span></span>`;
-
-    } else {
-      return `<span class="port-chip no-browse">${p.port}<span class="chip-tip">${escHtml(p.service)}</span></span>`;
-    }
-  }).join('');
-}
-
-function ipNum(ip) {
-  return ip.split('.').reduce((a, b) => a * 256 + parseInt(b), 0);
-}
-
-
-
-// ── Port scan ────────────────────────────────────────────────────────────────
-
-function portScanManual(ip) {
-  portScanQueue = portScanQueue.filter(q => q !== ip);
-  portScan(ip);
-}
-
-async function drainPortScanQueue() {
-  if (portScanRunning || portScanQueue.length === 0) return;
-  portScanRunning = true;
-  while (portScanQueue.length > 0) {
-    const ip = portScanQueue.shift();
-    if (!document.getElementById(`row-${ip.replace(/\./g,'-')}`)) continue;
-    await portScan(ip);
-  }
-  portScanRunning = false;
-}
-
-async function portScan(ip) {
-  const key = ip.replace(/\./g, '-');
-  const cell = document.getElementById(`ports-inline-${key}`);
-  if (!cell) return;
-
-  // Don't re-show spinner on rows that already have cached port data (live scan refreshing)
-  const row = document.getElementById(`row-${key}`);
-  if (!row || row.classList.contains('cached-row')) {
-    // Keep existing display while refreshing silently
-  } else {
-    cell.innerHTML = `<div class="ports-scanning"><div class="spinner-sm"></div><span style="font-size:11px;">scanning...</span></div>`;
-  }
-
-  try {
-    const r = await fetch(`/api/port-scan?ip=${encodeURIComponent(ip)}`);
-    const d = await r.json();
-    if (row) row.classList.remove('scanning', 'cached-row');
-    if (d.error) {
-      cell.innerHTML = `<span style="color:var(--red);font-size:11px;">⚠ ${escHtml(d.error)}</span>`;
-    } else {
-      const ports = d.open_ports || [];
-      if (ports.length === 0) {
-        cell.innerHTML = `<span style="color:var(--muted);font-size:11px;">—</span>`;
-        if (row) row.classList.add('no-ports');
-        document.getElementById('toggle-empty-btn').style.display = '';
-      } else {
-        if (row) row.classList.remove('no-ports');
-        cell.innerHTML = `<div class="port-chips">${buildChips(ip, ports)}</div>`;
-      }
-      // Push port results to server cache
-      fetch('/api/cache/ports', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({[ip]: {open_ports: ports, os_guess: d.os_guess}})
-      }).catch(() => {});
-    }
-  } catch(e) {
-    cell.innerHTML = `<span style="color:var(--red);font-size:11px;">failed</span>`;
-    if (row) row.classList.remove('scanning');
-  }
-}
-
-// ── Silent port rescan ───────────────────────────────────────────────────────
-
-function schedulePortRescan() {
-  if (portRescanTimer) clearTimeout(portRescanTimer);
-  portRescanTimer = setTimeout(async () => {
-    portRescanTimer = null;
-    const ips = Object.keys(knownDevices);
-    if (!ips.length) return;
-    // Queue all known IPs for a silent rescan (don't show spinner — just update chips in place)
-    for (const ip of ips) {
-      portScanQueue.push(ip);
-    }
-    await drainPortScanQueue();
-    // Schedule next rescan
-    schedulePortRescan();
-  }, 300_000);
-}
-
-// ── Toggle empty rows ────────────────────────────────────────────────────────
-
-function toggleEmpty() {
-  const showing = document.body.classList.toggle('show-empty');
-  document.getElementById('toggle-empty-btn').textContent = showing ? 'Hide empty' : 'Show all';
-}
-
-// ── Auto-refresh ─────────────────────────────────────────────────────────────
-
-function startAutoRefresh() {
-  stopAutoRefresh();
-  countdown = 60;
-  countdownInterval = setInterval(() => {
-    countdown--;
-    const el = document.getElementById('countdown');
-    if (el) el.textContent = countdown;
-    if (countdown <= 0) runScan();
-  }, 1000);
-}
-
-function stopAutoRefresh() {
-  if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
-}
-
-function resetCountdown() {
-  countdown = 60;
-  const el = document.getElementById('countdown');
-  if (el) el.textContent = 60;
-  startAutoRefresh();
-}
-
-// ── Top bar ──────────────────────────────────────────────────────────────────
-
-function updateTopbar(exitIp, peers, hostname) {
-  const dot = document.getElementById('exit-dot');
-  const label = document.getElementById('exit-label');
-  const btn = document.getElementById('disconnect-btn');
-  if (exitIp) {
-    dot.classList.add('connected');
-    // Try to find hostname from peers
-    let name = hostname;
-    if (!name && peers) {
-      const match = peers.find(p => p.ip === exitIp);
-      if (match) name = match.hostname;
-    }
-    label.textContent = `Exit: ${name || exitIp}`;
-    btn.style.display = '';
-  } else {
-    dot.classList.remove('connected');
-    label.textContent = 'Not connected to exit node';
-    btn.style.display = 'none';
-  }
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function showLoading(msg) {
-  document.getElementById('main-content').innerHTML = `
-    <div style="text-align:center;padding:60px;color:var(--muted)">
-      <div class="spinner" style="width:32px;height:32px;margin:0 auto 16px"></div>
-      <p>${escHtml(msg)}</p>
-    </div>`;
-}
-
-function showError(msg) {
-  document.getElementById('main-content').innerHTML = `
-    <div style="text-align:center;padding:60px;color:var(--red)">
-      <div style="font-size:40px;margin-bottom:12px;">⚠️</div>
-      <p>${escHtml(msg)}</p>
-    </div>`;
-}
-
-// ── Guacamole ─────────────────────────────────────────────────────────────────
-
-async function openGuac(ip, port, proto) {
-  document.body.style.cursor = 'wait';
-  try {
-    const r = await fetch(`/api/guac-connect?ip=${encodeURIComponent(ip)}&port=${port}&proto=${proto}`);
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({detail: r.statusText}));
-      alert(`Guacamole error: ${err.detail || r.statusText}`);
-      return;
-    }
-    const d = await r.json();
-    tsOpen(d.url, `${proto.toUpperCase()} ${ip}:${port}`, proto);
-  } catch(e) {
-    alert(`Failed to connect to Guacamole: ${e}`);
-  } finally {
-    document.body.style.cursor = '';
-  }
-}
-
-// ── Theme ─────────────────────────────────────────────────────────────────────
-
-const THEMES = ['default', 'rosepine'];
-const THEME_LABELS = {default: 'Dark Slate', rosepine: 'Rosé Pine'};
-
-function applyTheme(name) {
-  document.body.classList.remove(...THEMES.map(t => `theme-${t}`));
-  if (name !== 'default') document.body.classList.add(`theme-${name}`);
-  localStorage.setItem('tailscan-theme', name);
-  // Update version badge subtitle
-  const vbadge = document.getElementById('version-badge');
-  if (vbadge) {
-    const span = document.getElementById('version-str');
-    const cur = span ? span.textContent : '';
-    vbadge.title = `Theme: ${THEME_LABELS[name] || name}`;
-  }
-}
-
-function cycleTheme() {
-  const cur = localStorage.getItem('tailscan-theme') || 'default';
-  const idx = THEMES.indexOf(cur);
-  const next = THEMES[(idx + 1) % THEMES.length];
-  applyTheme(next);
-  // Brief flash on logo to confirm
-  const logo = document.querySelector('.logo');
-  if (logo) {
-    logo.style.opacity = '0.3';
-    setTimeout(() => logo.style.opacity = '', 150);
-  }
-}
-
-// Apply saved theme on load
-applyTheme(localStorage.getItem('tailscan-theme') || 'default');
-
-// ── Version ───────────────────────────────────────────────────────────────────
-
-fetch('/api/version').then(r=>r.json()).then(d=>{
-  const el = document.getElementById('version-str');
-  if (el) el.textContent = 'v' + d.version;
-}).catch(()=>{});
-
-// ── Init ─────────────────────────────────────────────────────────────────────
-
-(async () => {
-  await loadPeers();
-  if (currentExitNode) {
-    startAutoRefresh();
-    await runScan();
-  }
-})();
-</script>
-
-<!-- ── Taskbar ────────────────────────────────────────────────────────── -->
-<div id="taskbar" style="position:fixed;bottom:0;left:0;right:0;z-index:8000;background:var(--surface);border-top:1px solid var(--border);display:flex;align-items:stretch;height:36px;gap:0;">
-  <div id="taskbar-tabs" style="display:flex;align-items:stretch;flex:1;overflow-x:auto;gap:2px;padding:3px 4px;"></div>
-  <button id="taskbar-close-all" onclick="tsCloseAll()" title="Close all tasks" style="padding:0 10px;background:none;border:none;border-left:1px solid var(--border);color:var(--muted);cursor:pointer;font-size:13px;flex-shrink:0;">&times; all</button>
-</div>
-
-<!-- Task panels container (iframes + elFinder panels live here) -->
-<div id="task-panels" style="position:fixed;bottom:36px;left:0;right:0;top:0;z-index:7999;pointer-events:none;display:none;"></div>
+<!-- Alpine.js -->
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 
 <style>
+/* ── Themes ──────────────────────────────────────────────────── */
+:root {
+  --bg:           #0f1117;
+  --surface:      #1a1d27;
+  --surface2:     #222636;
+  --border:       #2d3148;
+  --text:         #e2e8f0;
+  --muted:        #7c85a2;
+  --accent:       #5b6ee8;
+  --accent-hover: #4a5cd6;
+  --green:        #22c55e;
+  --red:          #ef4444;
+  --yellow:       #f59e0b;
+  --orange:       #fb923c;
+}
+body.theme-rosepine {
+  --bg:           #191724;
+  --surface:      #1f1d2e;
+  --surface2:     #26233a;
+  --border:       #403d52;
+  --text:         #e0def4;
+  --muted:        #6e6a86;
+  --accent:       #c4a7e7;
+  --accent-hover: #ebbcba;
+  --green:        #9ccfd8;
+  --red:          #eb6f92;
+  --yellow:       #f6c177;
+  --orange:       #f6c177;
+}
+
+/* Map our vars into Shoelace's token system */
+body {
+  --sl-font-sans:                  -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --sl-panel-background-color:     var(--surface);
+  --sl-overlay-background-color:   rgba(0,0,0,0.75);
+  --sl-border-radius-medium:       8px;
+  --sl-border-radius-small:        5px;
+  /* Inputs */
+  --sl-input-background-color:          var(--surface);
+  --sl-input-background-color-hover:    var(--surface2);
+  --sl-input-background-color-focus:    var(--surface2);
+  --sl-input-border-color:              var(--border);
+  --sl-input-border-color-hover:        var(--muted);
+  --sl-input-border-color-focus:        var(--accent);
+  --sl-input-color:                     var(--text);
+  --sl-input-placeholder-color:         var(--muted);
+  --sl-input-label-color:               var(--muted);
+  /* Primary = accent */
+  --sl-color-primary-300: color-mix(in srgb, var(--accent) 60%, white);
+  --sl-color-primary-400: color-mix(in srgb, var(--accent) 80%, white);
+  --sl-color-primary-500: var(--accent);
+  --sl-color-primary-600: var(--accent-hover);
+  --sl-color-primary-700: color-mix(in srgb, var(--accent-hover) 80%, black);
+  /* Danger = red */
+  --sl-color-danger-500: var(--red);
+  --sl-color-danger-600: var(--red);
+  /* Success = green */
+  --sl-color-success-500: var(--green);
+  --sl-color-success-600: var(--green);
+  /* Dialog */
+  --sl-dialog-background-color: var(--surface);
+}
+
+/* ── Reset & base ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--sl-font-sans);
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 36px;
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* ── Top bar ──────────────────────────────────────────────────── */
+.topbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 16px; height: 52px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.logo {
+  font-weight: 700; font-size: 16px; color: var(--accent);
+  letter-spacing: 0.5px; cursor: pointer; user-select: none;
+  margin-right: 4px;
+  transition: opacity 0.15s;
+}
+.logo:hover { opacity: 0.75; }
+.exit-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--red); flex-shrink: 0;
+}
+.exit-dot.connected { background: var(--green); }
+.exit-label { font-size: 13px; color: var(--muted); }
+.topbar-gap { flex: 1; }
+
+/* ── Layout ───────────────────────────────────────────────────── */
+.layout { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Sidebar ──────────────────────────────────────────────────── */
+.sidebar {
+  width: 256px; flex-shrink: 0;
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.sidebar-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-title {
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--muted);
+}
+.sidebar-list { overflow-y: auto; flex: 1; padding: 6px; }
+.section-label {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--muted); padding: 8px 9px 3px;
+}
+.peer-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 9px; border-radius: 7px;
+  cursor: pointer; transition: background 0.1s;
+  margin-bottom: 1px;
+}
+.peer-item:hover { background: var(--surface2); }
+.peer-item.is-exit { cursor: pointer; }
+.peer-item.active-exit {
+  background: rgba(91,110,232,0.14);
+  outline: 1px solid rgba(91,110,232,0.28);
+}
+body.theme-rosepine .peer-item.active-exit {
+  background: rgba(196,167,231,0.12);
+  outline: 1px solid rgba(196,167,231,0.28);
+}
+.peer-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  flex-shrink: 0; background: var(--red);
+}
+.peer-dot.online { background: var(--green); }
+.peer-info { flex: 1; min-width: 0; }
+.peer-name {
+  font-size: 13px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.peer-ip { font-size: 11px; color: var(--muted); font-family: monospace; }
+.peer-tags { display: flex; gap: 3px; margin-top: 3px; flex-wrap: wrap; }
+.version-bar {
+  padding: 8px 14px; font-size: 10px; color: var(--muted);
+  border-top: 1px solid var(--border); text-align: center;
+}
+
+/* ── Main ─────────────────────────────────────────────────────── */
+.main {
+  flex: 1; overflow-y: auto; padding: 18px 20px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.centered-msg {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; flex: 1; text-align: center;
+  gap: 10px; color: var(--muted);
+}
+.centered-msg h2 { font-size: 18px; color: var(--text); }
+.centered-msg p { font-size: 14px; max-width: 300px; }
+
+/* ── Cards ────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px 18px;
+}
+.card-title {
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.7px;
+  color: var(--muted); margin-bottom: 12px;
+}
+
+/* ── Geo grid ─────────────────────────────────────────────────── */
+.geo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.geo-item label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 2px; }
+.geo-item .val { font-size: 14px; font-weight: 500; }
+.geo-item .val.ip { font-family: monospace; font-size: 15px; color: var(--accent); }
+
+/* ── Scan bar ─────────────────────────────────────────────────── */
+.scan-bar {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; color: var(--muted);
+  padding: 6px 0;
+}
+.scan-bar .gap { flex: 1; }
+
+/* ── Device table ─────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  text-align: left; padding: 7px 12px;
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.7px;
+  color: var(--muted); border-bottom: 1px solid var(--border);
+}
+td {
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(45,49,72,0.4);
+  vertical-align: middle;
+}
+tr:last-child td { border-bottom: none; }
+tr.device-row:hover td { background: var(--surface2); }
+.ip-cell { font-family: monospace; color: var(--accent); white-space: nowrap; }
+.status-up { color: var(--green); font-weight: 600; }
+tr.cached-row td { opacity: 0.65; }
+
+/* ── Port chips ───────────────────────────────────────────────── */
+.port-chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.port-chip {
+  position: relative;
+  font-size: 11px; font-family: monospace; font-weight: 600;
+  padding: 2px 6px; border-radius: 4px;
+  background: rgba(91,110,232,0.15); color: #a5b4fc;
+  border: 1px solid rgba(91,110,232,0.25);
+  cursor: pointer; white-space: nowrap; user-select: none;
+}
+.port-chip:hover { background: rgba(91,110,232,0.3); border-color: rgba(91,110,232,0.5); color: #c7d2fe; }
+.port-chip.no-click { cursor: default; }
+.port-chip.no-click:hover { background: rgba(91,110,232,0.15); border-color: rgba(91,110,232,0.25); color: #a5b4fc; }
+/* Green: SSH/RDP/VNC */
+.port-chip.g { background: rgba(34,197,94,0.12); color: #4ade80; border-color: rgba(34,197,94,0.3); }
+.port-chip.g:hover { background: rgba(34,197,94,0.25); border-color: rgba(34,197,94,0.5); color: #86efac; }
+body.theme-rosepine .port-chip.g { background: rgba(156,207,216,0.12); color: #9ccfd8; border-color: rgba(156,207,216,0.3); }
+body.theme-rosepine .port-chip.g:hover { background: rgba(156,207,216,0.25); color: #c8e8ec; }
+/* Orange: file transfer */
+.port-chip.o { background: rgba(249,115,22,0.13); color: #fb923c; border-color: rgba(249,115,22,0.3); }
+.port-chip.o:hover { background: rgba(249,115,22,0.25); border-color: rgba(249,115,22,0.5); color: #fdba74; }
+body.theme-rosepine .port-chip.o { background: rgba(246,193,119,0.13); color: #f6c177; border-color: rgba(246,193,119,0.3); }
+body.theme-rosepine .port-chip.o:hover { background: rgba(246,193,119,0.25); color: #f9d89a; }
+/* Tooltip */
+.chip-tip {
+  display: none;
+  position: absolute; bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%);
+  background: #2a2d3e; color: #e2e8f0; font-size: 11px;
+  font-family: -apple-system, sans-serif; font-weight: 500;
+  white-space: nowrap; padding: 4px 8px; border-radius: 5px;
+  border: 1px solid #3d4166; pointer-events: none; z-index: 500;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+.chip-tip::after {
+  content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 4px solid transparent; border-top-color: #3d4166;
+}
+.port-chip:hover .chip-tip { display: block; }
+.ports-scanning {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--muted);
+}
+
+/* ── Spinners ─────────────────────────────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner-sm {
+  display: inline-block; width: 10px; height: 10px;
+  border: 1.5px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+
+/* ── Taskbar ──────────────────────────────────────────────────── */
+#taskbar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 8000;
+  background: var(--surface); border-top: 1px solid var(--border);
+  display: flex; align-items: stretch; height: 36px;
+}
+#taskbar-tabs {
+  display: flex; align-items: stretch; flex: 1;
+  overflow-x: auto; gap: 2px; padding: 3px 4px;
+}
 .ts-tab {
-  display:flex;align-items:center;gap:5px;padding:0 8px 0 10px;
-  border-radius:5px;border:1px solid var(--border);background:var(--surface2);
-  color:var(--muted);font-size:12px;cursor:pointer;white-space:nowrap;
-  max-width:180px;min-width:80px;height:28px;flex-shrink:0;
+  display: flex; align-items: center; gap: 5px;
+  padding: 0 8px 0 10px; border-radius: 5px;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--muted); font-size: 12px; cursor: pointer;
+  white-space: nowrap; max-width: 180px; min-width: 70px;
+  height: 28px; flex-shrink: 0; transition: color 0.1s, border-color 0.1s;
 }
-.ts-tab.active { border-color:var(--accent);color:var(--text);background:var(--bg); }
-.ts-tab .ts-label { overflow:hidden;text-overflow:ellipsis;flex:1; }
-.ts-tab .ts-x { opacity:.5;font-size:14px;line-height:1;padding:0 2px;flex-shrink:0; }
-.ts-tab .ts-x:hover { opacity:1;color:var(--red); }
-.ts-tab .ts-icon { font-size:11px;flex-shrink:0;opacity:.7; }
+.ts-tab:hover { color: var(--text); border-color: var(--muted); }
+.ts-tab.active { border-color: var(--accent); color: var(--text); background: var(--bg); }
+.ts-tab .ts-label { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.ts-tab .ts-x {
+  opacity: 0.4; font-size: 14px; line-height: 1; padding: 0 2px;
+  flex-shrink: 0; border-radius: 3px;
+}
+.ts-tab .ts-x:hover { opacity: 1; color: var(--red); }
+.ts-tab .ts-icon { font-size: 11px; flex-shrink: 0; opacity: 0.8; }
+#taskbar-close-all {
+  padding: 0 12px; background: none; border: none;
+  border-left: 1px solid var(--border); color: var(--muted);
+  cursor: pointer; font-size: 12px; flex-shrink: 0;
+}
+#taskbar-close-all:hover { color: var(--red); }
+
+/* ── Task panels ──────────────────────────────────────────────── */
+#task-panels {
+  position: fixed; bottom: 36px; left: 0; right: 0; top: 0;
+  z-index: 7999; display: none;
+}
 .ts-panel {
-  position:absolute;inset:0;background:var(--bg);
-  pointer-events:auto;display:none;flex-direction:column;
+  position: absolute; inset: 0; background: var(--bg);
+  display: none; flex-direction: column;
 }
-.ts-panel.visible { display:flex; }
-.ts-panel iframe { flex:1;border:none;width:100%;height:100%; }
-</style>
+.ts-panel.visible { display: flex; }
+.ts-panel iframe { flex: 1; border: none; width: 100%; height: 100%; }
 
-<!-- ── elFinder: jQuery + elFinder assets ───────────────────────────────── -->
-<link rel="stylesheet" href="/static/elfinder/css/elfinder.min.css">
-<link rel="stylesheet" href="/static/elfinder/css/theme.css">
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
-<script src="/static/elfinder/js/elfinder.min.js"></script>
-
-<!-- ── elFinder modal wrapper ───────────────────────────────────────────── -->
-<div id="elfinder-modal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;">
-  <div id="elfinder-wrap" style="width:min(960px,96vw);height:min(680px,90vh);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;border:1px solid rgba(255,255,255,0.1);">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:var(--surface);border-bottom:1px solid var(--border);">
-      <span id="elf-title" style="font-size:13px;color:var(--muted);font-family:monospace;"></span>
-      <button id="elf-close-btn" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:20px;line-height:1;padding:0 4px;">&times;</button>
-    </div>
-    <div id="elfinder-container" style="flex:1;min-height:0;"></div>
-  </div>
-</div>
-
-<!-- ── elFinder theme overrides ─────────────────────────────────────────── -->
-<style>
-/* Shared overrides applied via JS class on wrap element */
+/* ── elFinder dark overrides ──────────────────────────────────── */
 .elf-dark .elfinder,
 .elf-dark .elfinder .elfinder-navbar,
 .elf-dark .elfinder .elfinder-cwd-wrapper,
 .elf-dark .elfinder .elfinder-statusbar { background: var(--bg) !important; color: var(--text) !important; }
-
 .elf-dark .elfinder .elfinder-toolbar { background: var(--surface) !important; border-bottom: 1px solid var(--border) !important; }
 .elf-dark .elfinder .elfinder-navbar { border-right: 1px solid var(--border) !important; }
 .elf-dark .elfinder .elfinder-cwd { background: var(--bg) !important; }
 .elf-dark .elfinder .elfinder-cwd-file .elfinder-cwd-filename { color: var(--text) !important; }
-.elf-dark .elfinder .elfinder-cwd-file.ui-selected .elfinder-cwd-filename { color: #fff !important; }
 .elf-dark .elfinder .elfinder-cwd-file.ui-selected { background: var(--accent) !important; opacity: 0.9; }
+.elf-dark .elfinder .elfinder-cwd-file.ui-selected .elfinder-cwd-filename { color: #fff !important; }
 .elf-dark .elfinder .elfinder-navbar-dir { color: var(--text) !important; }
 .elf-dark .elfinder .elfinder-navbar-dir.ui-state-active { background: var(--surface2) !important; color: var(--accent) !important; }
 .elf-dark .elfinder .elfinder-statusbar { border-top: 1px solid var(--border) !important; color: var(--muted) !important; }
-.elf-dark .elfinder .elfinder-path { color: var(--muted) !important; }
 .elf-dark .elfinder button.ui-state-default { background: var(--surface) !important; border-color: var(--border) !important; color: var(--text) !important; }
 .elf-dark .elfinder button.ui-state-hover { background: var(--surface2) !important; border-color: var(--accent) !important; }
 .elf-dark .elfinder .ui-dialog { background: var(--surface) !important; border: 1px solid var(--border) !important; color: var(--text) !important; }
@@ -971,284 +353,636 @@ fetch('/api/version').then(r=>r.json()).then(d=>{
 .elf-dark .elfinder .ui-dialog textarea { background: var(--bg) !important; color: var(--text) !important; border: 1px solid var(--border) !important; }
 .elf-dark .elfinder .elfinder-contextmenu { background: var(--surface) !important; border: 1px solid var(--border) !important; }
 .elf-dark .elfinder .elfinder-contextmenu-item:hover { background: var(--surface2) !important; }
-.elf-dark .elfinder .elfinder-contextmenu-separator { border-top: 1px solid var(--border) !important; }
-.elf-dark .elfinder .elfinder-info-title { background: var(--surface2) !important; }
-/* Scrollbars */
 .elf-dark .elfinder ::-webkit-scrollbar { width: 6px; height: 6px; }
 .elf-dark .elfinder ::-webkit-scrollbar-track { background: var(--bg); }
 .elf-dark .elfinder ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Shoelace small tweaks */
+sl-button::part(base) { font-family: var(--sl-font-sans); }
+sl-tag::part(base) { font-size: 10px; }
+sl-dialog::part(panel) { background: var(--surface); border: 1px solid var(--border); }
+sl-dialog::part(title) { color: var(--text); }
+sl-dialog::part(overlay) { background: rgba(0,0,0,0.75); }
 </style>
+</head>
+
+<body class="sl-theme-dark" x-data="tailscan()">
+
+<!-- ── Top bar ─────────────────────────────────────────────────── -->
+<div class="topbar">
+  <span class="logo" @click="cycleTheme()" title="Switch theme">🔍 TailScan</span>
+  <div class="exit-dot" :class="{connected: !!currentExitNode}"></div>
+  <span class="exit-label" x-text="currentExitNode ? `Exit: ${exitNodeName || currentExitNode}` : 'Not connected'"></span>
+  <div class="topbar-gap"></div>
+  <sl-button x-show="currentExitNode" variant="danger" size="small" @click="disconnectExit()">Disconnect</sl-button>
+  <sl-button x-show="hasEmptyRows" variant="default" size="small" @click="toggleEmpty()" x-text="showEmpty ? 'Hide empty' : 'Show all'"></sl-button>
+  <sl-button variant="default" size="small" onclick="location.href='/logout'">Logout</sl-button>
+</div>
+
+<!-- ── Layout ──────────────────────────────────────────────────── -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-head">
+      <span class="sidebar-title">Tailnet Devices</span>
+      <sl-icon-button name="arrow-clockwise" label="Refresh" @click="loadPeers()" style="font-size:14px"></sl-icon-button>
+    </div>
+    <div class="sidebar-list">
+      <!-- Loading -->
+      <div x-show="peersLoading" style="padding:20px;text-align:center">
+        <sl-spinner style="font-size:1.4rem;--indicator-color:var(--accent);--track-color:var(--border)"></sl-spinner>
+      </div>
+      <!-- Empty -->
+      <div x-show="!peersLoading && !peers.length" style="padding:14px;color:var(--muted);font-size:13px">No devices found</div>
+
+      <!-- Exit nodes -->
+      <template x-if="exitNodes.length">
+        <div>
+          <div class="section-label">Exit Nodes</div>
+          <template x-for="p in exitNodes" :key="p.ip">
+            <div class="peer-item is-exit" :class="{'active-exit': p.ip === currentExitNode}"
+                 @click="connectExit(p.ip, p.hostname)">
+              <div class="peer-dot" :class="{online: p.online}"></div>
+              <div class="peer-info">
+                <div class="peer-name" x-text="p.hostname"></div>
+                <div class="peer-ip" x-text="p.ip"></div>
+                <div class="peer-tags">
+                  <sl-tag x-show="p.exit_node" size="small" variant="primary">active</sl-tag>
+                  <sl-tag x-show="p.os" size="small" variant="neutral" x-text="p.os"></sl-tag>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- Other devices -->
+      <template x-if="otherPeers.length">
+        <div>
+          <div class="section-label">Devices</div>
+          <template x-for="p in otherPeers" :key="p.ip">
+            <div class="peer-item" style="cursor:default">
+              <div class="peer-dot" :class="{online: p.online}"></div>
+              <div class="peer-info">
+                <div class="peer-name" x-text="p.hostname"></div>
+                <div class="peer-ip" x-text="p.ip"></div>
+                <div class="peer-tags">
+                  <sl-tag x-show="p.self" size="small" variant="success">this device</sl-tag>
+                  <sl-tag x-show="p.os" size="small" variant="neutral" x-text="p.os"></sl-tag>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+    <div class="version-bar">TailScan <span x-text="version"></span></div>
+  </div>
+
+  <!-- Main content -->
+  <div class="main">
+
+    <!-- No exit node selected -->
+    <div class="centered-msg" x-show="!currentExitNode && scanStatus === 'idle'">
+      <div style="font-size:52px">🛰️</div>
+      <h2>Select an Exit Node</h2>
+      <p>Click an exit node on the left to connect and scan its LAN.</p>
+    </div>
+
+    <!-- Connecting spinner -->
+    <div class="centered-msg" x-show="scanStatus === 'connecting'">
+      <sl-spinner style="font-size:2rem;--indicator-color:var(--accent);--track-color:var(--border)"></sl-spinner>
+      <p x-text="scanMessage"></p>
+    </div>
+
+    <!-- Scan content -->
+    <template x-if="scanStatus !== 'idle' && scanStatus !== 'connecting'">
+      <div style="display:contents">
+
+        <!-- Scan bar -->
+        <div class="scan-bar">
+          <template x-if="scanStatus === 'scanning'">
+            <span>
+              <sl-spinner style="font-size:0.9rem;vertical-align:middle;--indicator-color:var(--accent);--track-color:var(--border)"></sl-spinner>
+              &nbsp;<span x-text="scanMessage"></span>
+            </span>
+          </template>
+          <template x-if="scanStatus === 'cached'">
+            <span style="color:var(--muted)" x-text="scanMessage"></span>
+          </template>
+          <template x-if="scanStatus === 'done'">
+            <span>
+              <span style="color:var(--green)">✓ Scan complete</span>
+              <span style="color:var(--muted);margin-left:8px">Next in <strong x-text="countdown"></strong>s</span>
+            </span>
+          </template>
+          <template x-if="scanStatus === 'error'">
+            <span style="color:var(--red)">⚠ <span x-text="scanMessage"></span></span>
+          </template>
+          <div class="gap"></div>
+          <sl-button size="small" variant="default" @click="runScan()"
+                     x-text="scanStatus === 'scanning' ? 'Restart' : 'Scan now'"></sl-button>
+        </div>
+
+        <!-- WAN / Geo card -->
+        <div class="card" x-show="geoInfo">
+          <div class="card-title">WAN &amp; Location</div>
+          <div class="geo-grid">
+            <div class="geo-item"><label>WAN IP</label><div class="val ip" x-text="geoInfo?.ip||'—'"></div></div>
+            <div class="geo-item"><label>City</label><div class="val" x-text="geoInfo?.city||'—'"></div></div>
+            <div class="geo-item"><label>Region</label><div class="val" x-text="geoInfo?.region||'—'"></div></div>
+            <div class="geo-item"><label>Country</label><div class="val" x-text="geoInfo?.country||'—'"></div></div>
+            <div class="geo-item"><label>ISP</label><div class="val" x-text="geoInfo?.isp||'—'"></div></div>
+            <div class="geo-item"><label>Timezone</label><div class="val" x-text="geoInfo?.timezone||'—'"></div></div>
+          </div>
+        </div>
+
+        <!-- Devices card -->
+        <div class="card" x-show="sortedDevices.length > 0">
+          <div class="card-title" x-text="deviceCardTitle"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>IP</th><th>Status</th><th>Open Ports</th></tr>
+              </thead>
+              <tbody>
+                <template x-for="dev in sortedDevices" :key="dev.ip">
+                  <tr class="device-row"
+                      :class="{'cached-row': dev.cached}"
+                      x-show="showEmpty || (dev.ports && dev.ports.length > 0)">
+                    <td class="ip-cell" x-text="dev.ip"></td>
+                    <td class="status-up">● up</td>
+                    <td>
+                      <div x-show="dev.scanning" class="ports-scanning">
+                        <div class="spinner-sm"></div>
+                        <span x-text="dev.scanMsg || 'scanning...'"></span>
+                      </div>
+                      <div x-show="!dev.scanning" class="port-chips"
+                           x-html="buildChips(dev.ip, dev.ports || [])"></div>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </template>
+
+  </div><!-- /.main -->
+</div><!-- /.layout -->
+
+<!-- ── Taskbar ──────────────────────────────────────────────────── -->
+<div id="taskbar">
+  <div id="taskbar-tabs">
+    <!-- Permanent home tab -->
+    <div class="ts-tab" :class="{active: activeTask === 'home'}" @click="tsActivate('home')">
+      <span class="ts-icon">🏠</span>
+      <span class="ts-label">Home</span>
+    </div>
+    <!-- Dynamic tabs -->
+    <template x-for="t in tasks" :key="t.id">
+      <div class="ts-tab" :class="{active: activeTask === t.id}" @click="tsActivate(t.id)">
+        <span class="ts-icon" x-text="tsIcons[t.type] || '▪'"></span>
+        <span class="ts-label" x-text="t.label"></span>
+        <span class="ts-x" @click.stop="tsClose(t.id)">&times;</span>
+      </div>
+    </template>
+  </div>
+  <button id="taskbar-close-all" @click="tsCloseAll()" title="Close all tasks">&times; all</button>
+</div>
+
+<!-- Task panels -->
+<div id="task-panels">
+  <template x-for="t in tasks" :key="t.id">
+    <div class="ts-panel" :class="{visible: activeTask === t.id}" :id="'panel-' + t.id">
+      <template x-if="t.type !== 'files'">
+        <iframe :src="t.url" allow="fullscreen *" allowfullscreen></iframe>
+      </template>
+      <template x-if="t.type === 'files'">
+        <div :id="'elf-inner-' + t.id" style="flex:1;display:flex;flex-direction:column;min-height:0;"></div>
+      </template>
+    </div>
+  </template>
+</div>
+
+<!-- ── File browser credentials dialog ─────────────────────────── -->
+<sl-dialog id="fb-creds-dlg" label="File Browser">
+  <div style="display:flex;flex-direction:column;gap:12px;">
+    <div id="fb-dlg-info" style="font-size:12px;color:var(--muted);font-family:monospace"></div>
+    <sl-input id="fb-dlg-user" label="Username" placeholder="Leave blank for guest/anonymous" clearable></sl-input>
+    <sl-input id="fb-dlg-pass" label="Password" type="password" password-toggle></sl-input>
+    <sl-input id="fb-dlg-share" label="Share name" placeholder="e.g. Data, homes (SMB only — blank to list)"></sl-input>
+  </div>
+  <sl-button slot="footer" variant="primary" id="fb-dlg-ok">Browse Files</sl-button>
+</sl-dialog>
+
+<!-- ── jQuery + elFinder ────────────────────────────────────────── -->
+<link rel="stylesheet" href="/static/elfinder/css/elfinder.min.css">
+<link rel="stylesheet" href="/static/elfinder/css/theme.css">
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+<script src="/static/elfinder/js/elfinder.min.js"></script>
 
 <script>
-// ── elFinder integration ──────────────────────────────────────────────────────
-
-let _elfInstance = null;
-let _elfState = {};
-
-function openFileBrowser(ip, port, proto) {
-  _elfState = { ip, port, proto, share: '', user: '', password: '' };
-  // Open as a taskbar task (creds dialog shown inside the task panel)
-  tsOpen(null, `${proto.toUpperCase()} ${ip}:${port}`, 'files', { ip, port, proto });
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function ipNum(ip) {
+  return ip.split('.').reduce((a,b) => a * 256 + parseInt(b), 0);
 }
 
-function _elfShowCredsDialog(ip, port, proto) {
-  // Simple inline credential prompt
-  const modal = document.getElementById('elfinder-modal');
-  const container = document.getElementById('elfinder-container');
-  const title = document.getElementById('elf-title');
-  title.textContent = `${proto.toUpperCase()} — ${ip}:${port}`;
+// ── Port chip config ──────────────────────────────────────────────────────────
+const GUAC_PORTS = new Set([22, 3389, 5900, 5901, 5902, 5903]);
+const GUAC_PROTOS = {22:'ssh', 3389:'rdp', 5900:'vnc', 5901:'vnc', 5902:'vnc', 5903:'vnc'};
+const COPY_PORTS = new Set([3923, 30266]);
+const FILE_PORTS = new Set([21, 445, 873, 2049, 548]);
+const FILE_LABELS = {21:'FTP', 445:'SMB', 873:'rsync', 2049:'NFS', 548:'AFP'};
+const BROWSABLE = new Set([
+  80,443,8080,8081,8082,8090,8443,8006,8007,8123,8888,5000,5001,8001,
+  32400,10000,9090,9091,3000,3001,4000,4200,7000,7001,8096,8097,8920,
+  7878,8989,8686,9696,8787,5055,5299,9117,9443,1880,9000,9393,9999,4040,8200
+]);
 
-  container.innerHTML = `
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;background:var(--bg);gap:12px;padding:32px;">
-      <div style="font-size:15px;color:var(--text);font-weight:600;">${proto.toUpperCase()} File Browser</div>
-      <div style="font-size:12px;color:var(--muted);">${ip}:${port}</div>
-      <div style="display:flex;flex-direction:column;gap:8px;width:min(320px,90%);">
-        <input id="elf-user-input" placeholder="Username (blank for guest)" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;outline:none;">
-        <input id="elf-pass-input" type="password" placeholder="Password" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;outline:none;">
-        ${proto === 'smb' ? `<input id="elf-share-input" placeholder="Share name (e.g. Data, homes)" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;outline:none;">` : ''}
-        <button onclick="_elfLaunch()" style="padding:8px;border-radius:6px;border:none;background:rgba(249,115,22,0.35);color:#fdba74;font-size:13px;font-weight:600;cursor:pointer;margin-top:4px;">Browse Files</button>
-      </div>
-    </div>`;
-
-  modal.style.display = 'flex';
-  setTimeout(() => document.getElementById('elf-user-input')?.focus(), 50);
-
-  // Enter key submits
-  container.querySelectorAll('input').forEach(i => {
-    i.addEventListener('keydown', e => { if (e.key === 'Enter') _elfLaunch(); });
-  });
+function buildChips(ip, ports) {
+  if (!ports || !ports.length) return '<span style="color:var(--muted);font-size:11px">—</span>';
+  return ports.map(p => {
+    const pt = p.port;
+    if (GUAC_PORTS.has(pt)) {
+      const proto = GUAC_PROTOS[pt];
+      const tip = `${escHtml(p.service)} — open in Guacamole (${proto.toUpperCase()})`;
+      return `<span class="port-chip g" onclick="tsOpenGuac('${ip}',${pt},'${proto}')">${pt}<span class="chip-tip">${tip}</span></span>`;
+    }
+    if (COPY_PORTS.has(pt)) {
+      const url = `/proxy?t=${encodeURIComponent(`http://${ip}:${pt}/`)}`;
+      return `<span class="port-chip o" onclick="tsOpen(${JSON.stringify(url)},${JSON.stringify(`Copyparty ${ip}:${pt}`)},'web')">${pt}<span class="chip-tip">Copyparty — click to browse</span></span>`;
+    }
+    if (FILE_PORTS.has(pt)) {
+      const label = FILE_LABELS[pt] || escHtml(p.service);
+      if (pt === 445 || pt === 21) {
+        const proto = pt === 445 ? 'smb' : 'ftp';
+        return `<span class="port-chip o" onclick="openFileBrowser('${ip}',${pt},'${proto}')">${pt}<span class="chip-tip">${label} — browse files</span></span>`;
+      }
+      return `<span class="port-chip o no-click">${pt}<span class="chip-tip">${label}</span></span>`;
+    }
+    if (BROWSABLE.has(pt)) {
+      const scheme = [443,8443,8006].includes(pt) ? 'https' : 'http';
+      const url = `/proxy?t=${encodeURIComponent(`${scheme}://${ip}:${pt}/`)}`;
+      const tip = `${escHtml(p.service||'Web')} — click to browse`;
+      return `<span class="port-chip" onclick="tsOpen(${JSON.stringify(url)},${JSON.stringify(`${p.service||'Web'} ${ip}:${pt}`)},'web')">${pt}<span class="chip-tip">${tip}</span></span>`;
+    }
+    return `<span class="port-chip no-click">${pt}<span class="chip-tip">${escHtml(p.service||String(pt))}</span></span>`;
+  }).join('');
 }
 
-function _elfLaunch() {
-  const user = document.getElementById('elf-user-input')?.value || '';
-  const pass = document.getElementById('elf-pass-input')?.value || '';
-  const share = document.getElementById('elf-share-input')?.value || '';
-  _elfState.user = user;
-  _elfState.password = pass;
-  _elfState.share = share;
-  _elfInit();
-}
+// ── Alpine app ────────────────────────────────────────────────────────────────
+function tailscan() {
+  return {
+    // ── Peers ───────────────────────────────────────────────────────
+    peers: [],
+    peersLoading: true,
+    currentExitNode: null,
+    exitNodeName: null,
+    version: '...',
 
-function _elfThemeClass() {
-  // Always dark (both themes are dark)
-  return 'elf-dark';
-}
+    get exitNodes() { return this.peers.filter(p => p.exit_node_option && !p.self); },
+    get otherPeers() { return this.peers.filter(p => !p.exit_node_option || p.self); },
 
-function _elfInit() {
-  const { ip, port, proto, share, user, password } = _elfState;
-  const container = document.getElementById('elfinder-container');
-  const wrap = document.getElementById('elfinder-wrap');
-  wrap.classList.add(_elfThemeClass());
+    // ── Scan ─────────────────────────────────────────────────────────
+    scanStatus: 'idle',  // idle | connecting | scanning | cached | done | error
+    scanMessage: '',
+    geoInfo: null,
+    devices: {},         // ip -> { ip, ports, scanning, scanMsg, cached }
+    subnet: '',
+    showEmpty: false,
+    countdown: 60,
+    _scanSrc: null,
+    _countdownTimer: null,
+    _portQueue: [],
+    _portRunning: false,
+    _rescanTimer: null,
 
-  // Destroy previous instance if any
-  if (_elfInstance) {
-    try { _elfInstance.destroy(); } catch(e) {}
-    _elfInstance = null;
-  }
-  container.innerHTML = '';
-  const el = $('<div>').appendTo(container);
-
-  const connUrl = `/api/elfinder?proto=${encodeURIComponent(proto)}&host=${encodeURIComponent(ip)}&port=${port}&share=${encodeURIComponent(share)}&user=${encodeURIComponent(user)}&password=${encodeURIComponent(password)}`;
-
-  _elfInstance = el.elfinder({
-    url: connUrl,
-    height: '100%',
-    resizable: false,
-    useBrowserHistory: false,
-    rememberLastDir: false,
-    soundPath: '/static/elfinder/sounds/',
-    lang: 'en',
-    uiOptions: {
-      toolbar: [
-        ['back', 'forward', 'up'],
-        ['mkdir', 'upload'],
-        ['copy', 'cut', 'paste'],
-        ['rm'],
-        ['info'],
-        ['view', 'sort'],
-      ],
+    get sortedDevices() {
+      return Object.values(this.devices).sort((a,b) => ipNum(a.ip) - ipNum(b.ip));
     },
-    contextmenu: {
-      files: ['getfile', '|', 'open', 'download', '|', 'mkdir', 'upload', '|', 'copy', 'cut', 'paste', '|', 'rm', '|', 'info'],
-      navbar: ['open', '|', 'mkdir', '|', 'info'],
-      cwd: ['reload', 'back', '|', 'mkdir', 'upload', 'paste', '|', 'info'],
+    get hasEmptyRows() {
+      return Object.values(this.devices).some(d => !d.ports || d.ports.length === 0);
     },
-  }).elfinder('instance');
-}
+    get deviceCardTitle() {
+      const n = Object.keys(this.devices).length;
+      if (this.scanStatus === 'scanning') return `LAN Devices — scanning... (${n} found)`;
+      if (this.scanStatus === 'cached') return `LAN Devices — ${n} (cached)`;
+      return `LAN Devices — ${n} found`;
+    },
 
-function _elfClose() {
-  document.getElementById('elfinder-modal').style.display = 'none';
-  if (_elfInstance) {
-    try { _elfInstance.destroy(); } catch(e) {}
-    _elfInstance = null;
-  }
-  document.getElementById('elfinder-wrap').classList.remove('elf-dark');
-  document.getElementById('elfinder-container').innerHTML = '';
-}
+    // ── Taskbar ──────────────────────────────────────────────────────
+    tasks: [],
+    activeTask: 'home',
+    _nextTaskId: 1,
+    tsIcons: { web:'🌐', ssh:'🖥', rdp:'🖥', vnc:'🖥', files:'📁' },
 
-document.getElementById('elf-close-btn').addEventListener('click', _elfClose);
-document.getElementById('elfinder-modal').addEventListener('click', e => {
-  if (e.target === document.getElementById('elfinder-modal')) _elfClose();
-});
+    // ── Init ─────────────────────────────────────────────────────────
+    async init() {
+      const saved = localStorage.getItem('tailscan-theme') || 'default';
+      this.applyTheme(saved);
+      await this.loadPeers();
+      fetch('/api/version').then(r=>r.json()).then(d=>{ this.version='v'+d.version; }).catch(()=>{});
+      if (this.currentExitNode) {
+        this.startCountdown();
+        this.runScan();
+      }
+    },
 
-// Re-apply theme class when theme switches
-const _origApplyTheme = typeof applyTheme !== 'undefined' ? applyTheme : null;
-if (_origApplyTheme) {
-  // Wrap applyTheme to also update elFinder wrap class
-  window.applyTheme = function(name) {
-    _origApplyTheme(name);
-    const wrap = document.getElementById('elfinder-wrap');
-    wrap.classList.remove('elf-dark');
-    wrap.classList.add(_elfThemeClass());
+    // ── Peers ─────────────────────────────────────────────────────────
+    async loadPeers() {
+      this.peersLoading = true;
+      try {
+        const r = await fetch('/api/peers');
+        const d = await r.json();
+        this.peers = d.peers;
+        this.currentExitNode = d.current_exit_node;
+        const match = d.peers.find(p => p.ip === d.current_exit_node);
+        this.exitNodeName = match?.hostname || null;
+      } catch(e) {}
+      this.peersLoading = false;
+    },
+
+    // ── Exit node ─────────────────────────────────────────────────────
+    async connectExit(ip, hostname) {
+      this.scanStatus = 'connecting';
+      this.scanMessage = `Connecting to ${hostname}...`;
+      try {
+        await fetch('/api/exit-node/set', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ip})
+        });
+        this.currentExitNode = ip;
+        this.exitNodeName = hostname;
+        await this.loadPeers();
+        this.startCountdown();
+        this.runScan();
+      } catch(e) {
+        this.scanStatus = 'error';
+        this.scanMessage = 'Failed to connect to exit node.';
+      }
+    },
+
+    async disconnectExit() {
+      this.stopCountdown();
+      if (this._scanSrc) { this._scanSrc.close(); this._scanSrc = null; }
+      await fetch('/api/exit-node/disconnect', {method:'POST'});
+      this.currentExitNode = null;
+      this.exitNodeName = null;
+      this.scanStatus = 'idle';
+      this.devices = {};
+      this.geoInfo = null;
+      await this.loadPeers();
+    },
+
+    // ── Scan ──────────────────────────────────────────────────────────
+    runScan() {
+      if (this._scanSrc) { this._scanSrc.close(); this._scanSrc = null; }
+      this.stopCountdown();
+      this.scanStatus = 'scanning';
+      this.scanMessage = 'Connecting...';
+      const seenIPs = new Set();
+
+      const src = new EventSource('/api/scan');
+      this._scanSrc = src;
+
+      src.onmessage = (e) => {
+        const d = JSON.parse(e.data);
+
+        if (d.type === 'meta') {
+          if (!d.connected) {
+            this.scanStatus = 'error';
+            this.scanMessage = 'Not connected to exit node.';
+            this.devices = {};
+            src.close(); return;
+          }
+          this.geoInfo = d.geo;
+          this.subnet = d.subnet;
+          this.scanMessage = `Scanning ${d.subnet}...`;
+        }
+
+        else if (d.type === 'cache_done') {
+          const ago = d.scanned_at ? Math.round((Date.now()/1000 - d.scanned_at)/60) : null;
+          this.scanStatus = 'cached';
+          this.scanMessage = `Cached results${ago !== null ? ` · ${ago}m ago` : ''} · live scan in progress...`;
+        }
+
+        else if (d.type === 'cached') {
+          if (!this.devices[d.ip]) {
+            this.devices[d.ip] = { ip:d.ip, ports:d.open_ports||null, scanning:!d.open_ports, scanMsg:'queued', cached:true };
+            if (!d.open_ports) { this._portQueue.push(d.ip); this._drainPortQueue(); }
+          }
+        }
+
+        else if (d.type === 'device') {
+          seenIPs.add(d.ip);
+          if (this.devices[d.ip]) {
+            this.devices[d.ip].cached = false;
+          } else {
+            this.devices[d.ip] = { ip:d.ip, ports:null, scanning:true, scanMsg:'queued', cached:false };
+            this._portQueue.push(d.ip);
+            this._drainPortQueue();
+          }
+          this.scanStatus = 'scanning';
+          this.scanMessage = `Scanning ${this.subnet}...`;
+        }
+
+        else if (d.type === 'error') {
+          this.scanStatus = 'error';
+          this.scanMessage = d.message;
+          src.close();
+        }
+
+        else if (d.type === 'done') {
+          src.close(); this._scanSrc = null;
+          // Remove disappeared devices
+          for (const ip of Object.keys(this.devices)) {
+            if (!seenIPs.has(ip)) delete this.devices[ip];
+          }
+          this.scanStatus = 'done';
+          this.startCountdown();
+          this._scheduleRescan();
+        }
+      };
+
+      src.onerror = () => {
+        src.close(); this._scanSrc = null;
+        if (this.scanStatus === 'scanning') {
+          this.scanStatus = 'error';
+          this.scanMessage = 'Connection lost';
+        }
+      };
+    },
+
+    async _drainPortQueue() {
+      if (this._portRunning || !this._portQueue.length) return;
+      this._portRunning = true;
+      while (this._portQueue.length) {
+        const ip = this._portQueue.shift();
+        if (!this.devices[ip]) continue;
+        await this._portScan(ip);
+      }
+      this._portRunning = false;
+    },
+
+    async _portScan(ip) {
+      const dev = this.devices[ip];
+      if (!dev) return;
+      // Only show spinner if no ports cached yet
+      if (!dev.ports) { dev.scanning = true; dev.scanMsg = 'scanning...'; }
+      try {
+        const r = await fetch(`/api/port-scan?ip=${encodeURIComponent(ip)}`);
+        const d = await r.json();
+        dev.scanning = false;
+        dev.ports = d.open_ports || [];
+        if (!d.error) {
+          fetch('/api/cache/ports', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({[ip]:{open_ports:d.open_ports||[], os_guess:d.os_guess}})
+          }).catch(()=>{});
+        }
+        if (!dev.ports.length) this.hasEmptyRows; // reactive touch
+      } catch(e) {
+        dev.scanning = false;
+        dev.ports = [];
+      }
+    },
+
+    _scheduleRescan() {
+      if (this._rescanTimer) clearTimeout(this._rescanTimer);
+      this._rescanTimer = setTimeout(() => {
+        this._rescanTimer = null;
+        for (const ip of Object.keys(this.devices)) this._portQueue.push(ip);
+        this._drainPortQueue();
+        this._scheduleRescan();
+      }, 300_000);
+    },
+
+    toggleEmpty() { this.showEmpty = !this.showEmpty; },
+
+    // ── Countdown ─────────────────────────────────────────────────────
+    startCountdown() {
+      this.stopCountdown();
+      this.countdown = 60;
+      this._countdownTimer = setInterval(() => {
+        this.countdown--;
+        if (this.countdown <= 0) this.runScan();
+      }, 1000);
+    },
+    stopCountdown() {
+      if (this._countdownTimer) { clearInterval(this._countdownTimer); this._countdownTimer = null; }
+    },
+
+    // ── Theme ─────────────────────────────────────────────────────────
+    applyTheme(name) {
+      document.body.classList.remove('theme-rosepine');
+      if (name === 'rosepine') document.body.classList.add('theme-rosepine');
+      localStorage.setItem('tailscan-theme', name);
+    },
+    cycleTheme() {
+      const cur = localStorage.getItem('tailscan-theme') || 'default';
+      const next = cur === 'default' ? 'rosepine' : 'default';
+      this.applyTheme(next);
+      // Brief flash on logo
+      const logo = document.querySelector('.logo');
+      if (logo) { logo.style.opacity='0.3'; setTimeout(()=>logo.style.opacity='',150); }
+    },
+
+    // ── Taskbar ───────────────────────────────────────────────────────
+    tsOpen(url, label, type, elfState) {
+      // Reuse existing
+      for (const t of this.tasks) {
+        if (url && t.url === url && t.type === type) { this.tsActivate(t.id); return; }
+        if (type === 'files' && t.type === 'files' && elfState &&
+            t.elfState?.ip === elfState.ip && t.elfState?.port === elfState.port) {
+          this.tsActivate(t.id); return;
+        }
+      }
+      const id = 'ts' + (this._nextTaskId++);
+      this.tasks.push({ id, label, type, url, elfState: elfState || null });
+      this.$nextTick(() => {
+        if (type === 'files') {
+          const container = document.getElementById('elf-inner-' + id);
+          if (container) elfShowCreds(container, id, elfState);
+        }
+        this.tsActivate(id);
+      });
+    },
+
+    tsActivate(id) {
+      this.activeTask = id;
+      document.getElementById('task-panels').style.display = id === 'home' ? 'none' : 'block';
+    },
+
+    tsClose(id) {
+      this.tasks = this.tasks.filter(t => t.id !== id);
+      if (this.activeTask === id) {
+        const ids = this.tasks.map(t=>t.id);
+        this.tsActivate(ids.length ? ids[ids.length-1] : 'home');
+      }
+    },
+
+    tsCloseAll() {
+      this.tasks = [];
+      this.tsActivate('home');
+    },
   };
 }
 
-// ── Taskbar ───────────────────────────────────────────────────────────────────
-
-const _tsTasks = {}; // id -> { label, type, url, elfState }
-let _tsActive = 'home';
-let _tsNextId = 1;
-
-const _tsIcons = { home: '🏠', web: '🌐', ssh: '🖥', rdp: '🖥', vnc: '🖥', files: '📁' };
-
-// Create permanent Home tab on page load
-(function() {
-  const tabs = document.getElementById('taskbar-tabs');
-  const tab = document.createElement('div');
-  tab.className = 'ts-tab active';
-  tab.id = 'tab-home';
-  tab.innerHTML = `<span class="ts-icon">🏠</span><span class="ts-label">Home</span>`;
-  tab.addEventListener('click', () => tsActivate('home'));
-  tabs.appendChild(tab);
-  document.body.style.paddingBottom = '36px';
-})();
-
-function tsOpen(url, label, type, elfState) {
-  // Reuse existing task with same url if already open
-  for (const [id, t] of Object.entries(_tsTasks)) {
-    if (t.url === url && t.type === type && url !== null) {
-      tsActivate(id); return;
+// ── Guacamole opener (standalone fn called from chip HTML) ────────────────────
+async function tsOpenGuac(ip, port, proto) {
+  document.body.style.cursor = 'wait';
+  try {
+    const r = await fetch(`/api/guac-connect?ip=${encodeURIComponent(ip)}&port=${port}&proto=${proto}`);
+    if (!r.ok) {
+      const err = await r.json().catch(()=>({detail:r.statusText}));
+      alert(`Guacamole error: ${err.detail||r.statusText}`); return;
     }
-    if (type === 'files' && t.type === 'files' &&
-        elfState && t.elfState &&
-        t.elfState.ip === elfState.ip && t.elfState.port === elfState.port) {
-      tsActivate(id); return;
-    }
-  }
-
-  const id = 'ts' + (_tsNextId++);
-  _tsTasks[id] = { label, type, url, elfState };
-
-  // Create panel
-  const panels = document.getElementById('task-panels');
-  const panel = document.createElement('div');
-  panel.className = 'ts-panel';
-  panel.id = 'panel-' + id;
-  panels.appendChild(panel);
-
-  if (type === 'files') {
-    panel.innerHTML = `<div id="elf-inner-${id}" style="flex:1;display:flex;flex-direction:column;"></div>`;
-    setTimeout(() => {
-      _elfState = { ...elfState };
-      const container = document.getElementById('elf-inner-' + id);
-      _elfShowCredsInContainer(container, id);
-    }, 0);
-  } else {
-    panel.innerHTML = `<iframe src="${escAttr(url)}" allow="fullscreen *" allowfullscreen></iframe>`;
-  }
-
-  // Create tab
-  const tabs = document.getElementById('taskbar-tabs');
-  const tab = document.createElement('div');
-  tab.className = 'ts-tab';
-  tab.id = 'tab-' + id;
-  tab.innerHTML = `<span class="ts-icon">${_tsIcons[type] || '▪'}</span><span class="ts-label">${escHtml(label)}</span><span class="ts-x" onclick="event.stopPropagation();tsClose('${id}')">&times;</span>`;
-  tab.addEventListener('click', () => tsActivate(id));
-  tabs.appendChild(tab);
-
-  tsActivate(id);
-}
-
-function tsActivate(id) {
-  document.querySelectorAll('.ts-panel').forEach(p => p.classList.remove('visible'));
-  document.querySelectorAll('.ts-tab').forEach(t => t.classList.remove('active'));
-  _tsActive = id;
-
-  const tab = document.getElementById('tab-' + id);
-  if (tab) tab.classList.add('active');
-
-  if (id === 'home') {
-    // Show main page content, hide panels overlay
-    document.getElementById('task-panels').style.display = 'none';
-    document.querySelector('.main-layout, main, #app, body > div:not(#taskbar):not(#task-panels):not(#elfinder-modal)')?.style && null;
-  } else {
-    // Show panels overlay
-    document.getElementById('task-panels').style.display = 'block';
-    const panel = document.getElementById('panel-' + id);
-    if (panel) panel.classList.add('visible');
+    const d = await r.json();
+    Alpine.store && null; // no-op
+    // Reach into the Alpine component
+    document.querySelector('[x-data]')?._x_dataStack?.[0]?.tsOpen(d.url, `${proto.toUpperCase()} ${ip}:${port}`, proto)
+      || window._tsApp?.tsOpen(d.url, `${proto.toUpperCase()} ${ip}:${port}`, proto);
+  } catch(e) {
+    alert(`Failed: ${e}`);
+  } finally {
+    document.body.style.cursor = '';
   }
 }
 
-function tsClose(id) {
-  const panel = document.getElementById('panel-' + id);
-  const tab = document.getElementById('tab-' + id);
-  if (panel) panel.remove();
-  if (tab) tab.remove();
-  delete _tsTasks[id];
-  // Go to last task or home
-  const ids = Object.keys(_tsTasks);
-  tsActivate(ids.length ? ids[ids.length - 1] : 'home');
-}
+// Bridge: chip HTML calls tsOpen/openFileBrowser on window
+// These proxy into Alpine via a stored reference
+window.tsOpen = function(url, label, type) {
+  window._tsApp?.tsOpen(url, label, type);
+};
+window.openFileBrowser = function(ip, port, proto) {
+  const dlg = document.getElementById('fb-creds-dlg');
+  document.getElementById('fb-dlg-info').textContent = `${proto.toUpperCase()} — ${ip}:${port}`;
+  document.getElementById('fb-dlg-share').style.display = proto === 'smb' ? '' : 'none';
+  document.getElementById('fb-dlg-ok').onclick = () => {
+    const user  = document.getElementById('fb-dlg-user').value || '';
+    const pass  = document.getElementById('fb-dlg-pass').value || '';
+    const share = document.getElementById('fb-dlg-share').value || '';
+    dlg.hide();
+    window._tsApp?.tsOpen(null, `${proto.toUpperCase()} ${ip}:${port}`, 'files',
+      {ip, port, proto, user, pass, share});
+  };
+  dlg.show();
+};
 
-function tsCloseAll() {
-  Object.keys(_tsTasks).forEach(id => {
-    document.getElementById('panel-' + id)?.remove();
-    document.getElementById('tab-' + id)?.remove();
-    delete _tsTasks[id];
-  });
-  tsActivate('home');
-}
-
-function escAttr(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;');
-}
-
-// elFinder inside a task panel (no separate modal)
-function _elfShowCredsInContainer(container, taskId) {
-  const { ip, port, proto } = _elfState;
-  container.innerHTML = `
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;background:var(--bg);gap:12px;padding:32px;">
-      <div style="font-size:15px;color:var(--text);font-weight:600;">${proto.toUpperCase()} File Browser</div>
-      <div style="font-size:12px;color:var(--muted);">${ip}:${port}</div>
-      <div style="display:flex;flex-direction:column;gap:8px;width:min(320px,90%);">
-        <input id="elf-user-${taskId}" placeholder="Username (blank for guest)" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;outline:none;">
-        <input id="elf-pass-${taskId}" type="password" placeholder="Password" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;outline:none;">
-        ${proto === 'smb' ? `<input id="elf-share-${taskId}" placeholder="Share name (e.g. Data, homes)" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;outline:none;">` : ''}
-        <button onclick="_elfLaunchInContainer('${taskId}')" style="padding:8px;border-radius:6px;border:none;background:rgba(249,115,22,0.35);color:#fdba74;font-size:13px;font-weight:600;cursor:pointer;margin-top:4px;">Browse Files</button>
-      </div>
-    </div>`;
-  setTimeout(() => document.getElementById(`elf-user-${taskId}`)?.focus(), 50);
-  container.querySelectorAll('input').forEach(i => {
-    i.addEventListener('keydown', e => { if (e.key === 'Enter') _elfLaunchInContainer(taskId); });
-  });
-}
-
-function _elfLaunchInContainer(taskId) {
-  const task = _tsTasks['ts' + taskId.replace('ts','')];
-  if (!task) return;
-  const { ip, port, proto } = task.elfState;
-  const user = document.getElementById(`elf-user-${taskId}`)?.value || '';
-  const pass = document.getElementById(`elf-pass-${taskId}`)?.value || '';
-  const share = document.getElementById(`elf-share-${taskId}`)?.value || '';
-
-  const panel = document.getElementById('panel-' + taskId);
-  panel.innerHTML = `<div id="elf-inner-${taskId}" style="flex:1;min-height:0;"></div>`;
-  const el = $(`<div>`).appendTo(`#elf-inner-${taskId}`);
-  const wrap = document.getElementById('panel-' + taskId);
-  wrap.classList.add('elf-dark');
-
+// elFinder launcher inside a task panel
+function elfShowCreds(container, taskId, elfState) {
+  const { ip, port, proto, user='', pass='', share='' } = elfState;
   const connUrl = `/api/elfinder?proto=${encodeURIComponent(proto)}&host=${encodeURIComponent(ip)}&port=${port}&share=${encodeURIComponent(share)}&user=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`;
-
+  container.classList.add('elf-dark');
+  const el = $('<div style="flex:1;height:100%">').appendTo(container);
   el.elfinder({
     url: connUrl,
     height: '100%',
@@ -1262,6 +996,11 @@ function _elfLaunchInContainer(taskId) {
     },
   });
 }
+
+// Store Alpine app reference once it's ready
+document.addEventListener('alpine:initialized', () => {
+  window._tsApp = document.querySelector('[x-data]')?._x_dataStack?.[0];
+});
 </script>
 
 </body>
