@@ -291,34 +291,54 @@ async function disconnectExit() {
 // ── Scan ─────────────────────────────────────────────────────────────────────
 
 let activeScanSource = null;
+let knownDevices = {};        // ip -> device data
+let portScanQueue = [];       // IPs queued for auto port scan
+let portScanRunning = false;  // only one at a time
+
+function isFirstScan() {
+  return Object.keys(knownDevices).length === 0;
+}
+
+function ensureScanUI() {
+  // Build scaffold once; on subsequent scans just update status
+  if (!document.getElementById('scan-wrap')) {
+    document.getElementById('main-content').innerHTML = `
+      <div id="scan-wrap">
+        <div class="refresh-bar" style="margin-bottom:12px;" id="scan-bar">
+          <div class="spinner"></div>
+          <span id="scan-status">Connecting...</span>
+          <span style="flex:1"></span>
+          <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Restart</button>
+        </div>
+        <div id="geo-card"></div>
+        <div id="device-card" class="card" style="display:none">
+          <div class="card-title" id="device-card-title">LAN Devices</div>
+          <div class="table-wrap"><table>
+            <thead><tr>
+              <th>IP</th><th>Hostname</th><th>Ping</th><th>MAC</th><th>Vendor</th><th>Status</th><th>Ports</th>
+            </tr></thead>
+            <tbody id="device-tbody"></tbody>
+          </table></div>
+        </div>
+      </div>`;
+  } else {
+    // Just reset the status bar
+    const bar = document.getElementById('scan-bar');
+    if (bar) bar.innerHTML = `
+      <div class="spinner"></div>
+      <span id="scan-status">Refreshing...</span>
+      <span style="flex:1"></span>
+      <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Restart</button>`;
+  }
+}
 
 function runScan() {
-  // Close any existing stream
   if (activeScanSource) { activeScanSource.close(); activeScanSource = null; }
   stopAutoRefresh();
+  ensureScanUI();
 
-  const main = document.getElementById('main-content');
-  main.innerHTML = `
-    <div id="scan-wrap">
-      <div class="refresh-bar" style="margin-bottom:12px;">
-        <div class="spinner"></div>
-        <span id="scan-status">Connecting...</span>
-        <span style="flex:1"></span>
-        <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Restart</button>
-      </div>
-      <div id="geo-card"></div>
-      <div id="device-card" class="card" style="display:none">
-        <div class="card-title" id="device-card-title">LAN Devices</div>
-        <div class="table-wrap"><table>
-          <thead><tr>
-            <th>IP</th><th>Hostname</th><th>Ping</th><th>MAC</th><th>Vendor</th><th>Status</th><th></th>
-          </tr></thead>
-          <tbody id="device-tbody"></tbody>
-        </table></div>
-      </div>
-    </div>`;
+  let seenIPs = new Set();  // IPs found in this scan cycle
 
-  let deviceCount = 0;
   const src = new EventSource('/api/scan');
   activeScanSource = src;
 
@@ -327,10 +347,12 @@ function runScan() {
 
     if (d.type === 'meta') {
       if (!d.connected) {
-        main.innerHTML = `<div id="no-exit-msg"><div style="font-size:56px;">🛰️</div><h2>Not Connected</h2><p>Select an exit node from the sidebar.</p></div>`;
+        document.getElementById('main-content').innerHTML = `
+          <div id="no-exit-msg"><div style="font-size:56px;">🛰️</div><h2>Not Connected</h2>
+          <p>Select an exit node from the sidebar.</p></div>`;
+        knownDevices = {};
         src.close(); return;
       }
-      // Render geo card
       const geo = d.geo || {};
       document.getElementById('geo-card').innerHTML = `
         <div class="card" style="margin-bottom:20px;">
@@ -344,35 +366,51 @@ function runScan() {
             <div class="geo-item"><label>Timezone</label><div class="value">${escHtml(geo.timezone||'—')}</div></div>
           </div>
         </div>`;
-      document.getElementById('scan-status').textContent = `Scanning ${d.subnet}...`;
+      const status = document.getElementById('scan-status');
+      if (status) status.textContent = `Scanning ${d.subnet}...`;
       document.getElementById('device-card').style.display = '';
-      document.getElementById('device-card-title').textContent = `LAN Devices — ${d.subnet} (scanning...)`;
+      document.getElementById('device-card-title').textContent =
+        `LAN Devices — ${d.subnet} (scanning...)`;
     }
 
     else if (d.type === 'device') {
-      deviceCount++;
-      const tbody = document.getElementById('device-tbody');
+      seenIPs.add(d.ip);
+      const isNew = !knownDevices[d.ip];
+      knownDevices[d.ip] = d;
       const key = d.ip.replace(/\./g, '-');
-      const row = document.createElement('tr');
-      row.id = `row-${key}`;
-      row.innerHTML = `
-        <td class="ip-cell">${escHtml(d.ip)}</td>
-        <td>${escHtml(d.hostname)}</td>
-        <td class="ping">${d.ping_ms != null ? d.ping_ms + ' ms' : '—'}</td>
-        <td class="mac-cell">${escHtml(d.mac)}</td>
-        <td style="color:var(--muted);font-size:12px;">${escHtml(d.vendor)}</td>
-        <td class="status-up">●&nbsp;up</td>
-        <td><button class="btn btn-ghost" style="padding:3px 10px;font-size:11px;" onclick="portScan('${d.ip}')">Scan Ports</button></td>`;
-      tbody.appendChild(row);
-      // Expandable ports row
-      const portRow = document.createElement('tr');
-      portRow.id = `ports-${key}`;
-      portRow.style.display = 'none';
-      portRow.innerHTML = '<td colspan="7" style="padding:0 12px 12px 12px;"></td>';
-      tbody.appendChild(portRow);
-      // Update title
+      const tbody = document.getElementById('device-tbody');
+
+      if (isNew) {
+        // Insert row in sorted IP order
+        const row = document.createElement('tr');
+        row.id = `row-${key}`;
+        row.innerHTML = deviceRowHTML(d);
+        const portRow = document.createElement('tr');
+        portRow.id = `ports-${key}`;
+        portRow.style.display = 'none';
+        portRow.innerHTML = '<td colspan="7" style="padding:0 12px 12px 12px;"></td>';
+
+        // Insert sorted by IP
+        const rows = tbody.querySelectorAll('tr[id^="row-"]');
+        let inserted = false;
+        for (const r of rows) {
+          const rip = r.id.replace('row-','').replace(/-/g,'.');
+          if (ipNum(d.ip) < ipNum(rip)) {
+            tbody.insertBefore(portRow, r);
+            tbody.insertBefore(row, portRow);
+            inserted = true; break;
+          }
+        }
+        if (!inserted) { tbody.appendChild(row); tbody.appendChild(portRow); }
+      } else {
+        // Update hostname/ping if changed (don't touch ports row)
+        const row = document.getElementById(`row-${key}`);
+        if (row) row.innerHTML = deviceRowHTML(d);
+      }
+
       const title = document.getElementById('device-card-title');
-      if (title) title.textContent = `LAN Devices — scanning... (${deviceCount} found)`;
+      if (title) title.textContent =
+        `LAN Devices — scanning... (${Object.keys(knownDevices).length} found)`;
     }
 
     else if (d.type === 'error') {
@@ -384,17 +422,39 @@ function runScan() {
     else if (d.type === 'done') {
       src.close();
       activeScanSource = null;
-      const status = document.getElementById('scan-status');
-      if (status) status.parentElement.innerHTML = `
-        <div class="refresh-bar">
-          <span style="color:var(--green);">✓ Scan complete</span>
-          <span style="color:var(--muted);margin-left:8px;">Next in <span class="countdown" id="countdown">30</span>s</span>
-          <span style="flex:1"></span>
-          <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Scan now</button>
-        </div>`;
+
+      // Remove rows for IPs that disappeared
+      for (const ip of Object.keys(knownDevices)) {
+        if (!seenIPs.has(ip)) {
+          const key = ip.replace(/\./g, '-');
+          document.getElementById(`row-${key}`)?.remove();
+          document.getElementById(`ports-${key}`)?.remove();
+          delete knownDevices[ip];
+        }
+      }
+
+      const bar = document.getElementById('scan-bar');
+      if (bar) bar.innerHTML = `
+        <span style="color:var(--green);">✓ Scan complete</span>
+        <span style="color:var(--muted);margin-left:8px;">Next in <span id="countdown">30</span>s</span>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost" onclick="runScan()" style="padding:4px 10px;font-size:12px;">Scan now</button>`;
       const title = document.getElementById('device-card-title');
       if (title) title.textContent = `LAN Devices — ${d.count} found`;
+
       resetCountdown();
+
+      // Auto port scan: queue IPs that don't have port data yet
+      const newIPs = [...seenIPs].filter(ip => {
+        const key = ip.replace(/\./g, '-');
+        const portRow = document.getElementById(`ports-${key}`);
+        // Only queue if not already scanned (port row still hidden = not yet done)
+        return portRow && portRow.style.display === 'none';
+      });
+      if (newIPs.length) {
+        portScanQueue.push(...newIPs);
+        drainPortScanQueue();
+      }
     }
   };
 
@@ -406,49 +466,90 @@ function runScan() {
   };
 }
 
+function deviceRowHTML(d) {
+  return `
+    <td class="ip-cell">${escHtml(d.ip)}</td>
+    <td>${escHtml(d.hostname)}</td>
+    <td class="ping">${d.ping_ms != null ? d.ping_ms + ' ms' : '—'}</td>
+    <td class="mac-cell">${escHtml(d.mac)}</td>
+    <td style="color:var(--muted);font-size:12px;">${escHtml(d.vendor)}</td>
+    <td class="status-up">●&nbsp;up</td>
+    <td id="port-btn-${d.ip.replace(/\./g,'-')}">
+      <button class="btn btn-ghost" style="padding:3px 10px;font-size:11px;"
+        onclick="portScanManual('${d.ip}')">Scan Ports</button>
+    </td>`;
+}
+
+function ipNum(ip) {
+  return ip.split('.').reduce((a, b) => a * 256 + parseInt(b), 0);
+}
+
 
 
 // ── Port scan ────────────────────────────────────────────────────────────────
 
+function portScanManual(ip) {
+  // Remove from auto queue if pending, then scan immediately
+  portScanQueue = portScanQueue.filter(q => q !== ip);
+  portScan(ip);
+}
+
+async function drainPortScanQueue() {
+  if (portScanRunning || portScanQueue.length === 0) return;
+  portScanRunning = true;
+  while (portScanQueue.length > 0) {
+    const ip = portScanQueue.shift();
+    // Skip if row was removed (device disappeared)
+    if (!document.getElementById(`row-${ip.replace(/\./g,'-')}`)) continue;
+    await portScan(ip);
+  }
+  portScanRunning = false;
+}
+
 async function portScan(ip) {
   const key = ip.replace(/\./g, '-');
   const row = document.getElementById(`ports-${key}`);
-  const btn = document.querySelector(`#row-${key} button`);
+  const btnCell = document.getElementById(`port-btn-${key}`);
   if (!row) return;
 
   row.style.display = '';
-  row.querySelector('td').innerHTML = `<div style="display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;padding:4px 0"><div class="spinner"></div> Scanning ${escHtml(ip)}...</div>`;
-  if (btn) { btn.disabled = true; btn.textContent = 'Scanning...'; }
+  row.querySelector('td').innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;padding:4px 0">
+      <div class="spinner"></div> Scanning ${escHtml(ip)}...
+    </div>`;
+  if (btnCell) btnCell.innerHTML = `<span style="font-size:11px;color:var(--muted);">scanning...</span>`;
 
   try {
     const r = await fetch(`/api/port-scan?ip=${encodeURIComponent(ip)}`);
     const d = await r.json();
     if (d.error) {
-      row.querySelector('td').innerHTML = `<div style="color:var(--red);font-size:13px;padding:4px 0;">⚠ ${escHtml(d.error)}</div>`;
+      row.querySelector('td').innerHTML =
+        `<div style="color:var(--red);font-size:13px;padding:4px 0;">⚠ ${escHtml(d.error)}</div>`;
     } else {
       const ports = d.open_ports || [];
-      const os = d.os_guess || 'Unknown';
+      const os = d.os_guess || '';
       const portHtml = ports.length
         ? ports.map(p => `
             <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);">
-              <span style="font-family:monospace;font-weight:600;color:var(--accent);min-width:48px;">${p.port}/${p.proto}</span>
+              <span style="font-family:monospace;font-weight:600;color:var(--accent);min-width:54px;">${p.port}/${p.proto}</span>
               <span style="font-size:12px;color:var(--text);">${escHtml(p.service)}</span>
             </div>`).join('')
-        : '<div style="color:var(--muted);font-size:13px;">No open ports found</div>';
+        : '<div style="color:var(--muted);font-size:13px;">No common ports open</div>';
       row.querySelector('td').innerHTML = `
         <div style="background:var(--surface2);border-radius:8px;padding:12px;margin:4px 0;">
-          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.7px;color:var(--muted);margin-bottom:8px;">
-            OS: <span style="color:var(--text);font-weight:400;">${escHtml(os)}</span>
-          </div>
+          ${os ? `<div style="font-size:11px;color:var(--muted);margin-bottom:8px;">OS: <span style="color:var(--text);">${escHtml(os)}</span></div>` : ''}
           <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.7px;color:var(--muted);margin-bottom:6px;">Open Ports</div>
           ${portHtml}
         </div>`;
     }
   } catch(e) {
-    row.querySelector('td').innerHTML = `<div style="color:var(--red);font-size:13px;padding:4px 0;">Scan failed</div>`;
+    row.querySelector('td').innerHTML =
+      `<div style="color:var(--red);font-size:13px;padding:4px 0;">Scan failed</div>`;
   }
 
-  if (btn) { btn.disabled = false; btn.textContent = 'Rescan'; }
+  if (btnCell) btnCell.innerHTML =
+    `<button class="btn btn-ghost" style="padding:3px 10px;font-size:11px;"
+      onclick="portScanManual('${ip}')">Rescan</button>`;
 }
 
 // ── Auto-refresh ─────────────────────────────────────────────────────────────
