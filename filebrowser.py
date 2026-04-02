@@ -103,6 +103,15 @@ def ftp_delete(host: str, port: int, username: str, password: str,
 
 # ─── SMB ─────────────────────────────────────────────────────────────────────
 
+# Force NTLM globally — prevents Kerberos/SPNEGO re-auth failures
+# when sessions expire mid-browse. Must be set before any connection.
+try:
+    import smbclient as _smbclient_init
+    _smbclient_init.ClientConfig().auth_protocol = "ntlm"
+except Exception:
+    pass
+
+
 def _smb_conn(host: str, username: str, password: str, port: int = 445):
     import smbclient
     # Always reset the session for this host so stale/bad sessions don't linger
