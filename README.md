@@ -1,52 +1,58 @@
 # TailScan
 
-Self-hosted web app to manage Tailscale exit nodes and scan the LAN at each remote site — all from a browser.
+Self-hosted web app to manage Tailscale exit nodes and scan remote LANs — all from a browser.
+
+![Python](https://img.shields.io/badge/python-3.11+-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green) ![License](https://img.shields.io/badge/license-MIT-lightgrey)
+
+---
 
 ## How it works
 
-- The server running TailScan **is** the Tailscale client
-- Selecting an exit node in the UI runs `tailscale set --exit-node=<ip>` on the server
-- All scans (nmap, WAN IP, geolocation) run from the server through the exit node
+- The machine running TailScan **is** the Tailscale client
+- Selecting an exit node runs `tailscale set --exit-node=<ip>` on the server
+- LAN discovery, port scanning, and WAN geolocation all run through the active exit node
 - Access the UI via the server's **Tailscale IP** — so exit node switches can never lock you out
 
 ---
 
-## Quick Start
+## Features
 
-### 1. Prerequisites
+- **Exit node selector** — lists all tailnet peers, one click to switch or disconnect
+- **Live LAN discovery** — fping sweep streams devices as they respond (~9s for /24)
+- **Auto port scan** — after discovery, scans common ports on every device automatically
+- **Port chips** — open ports shown as compact inline chips; hover for service name
+- **WAN + geo** — WAN IP, city, region, ISP, timezone via ip-api.com (no key needed)
+- **Diff refresh** — auto-refreshes every 30s without wiping the device list; port results persist
+- **Password auth** — SHA256 hashed password, 7-day session cookie
+- **Dark UI** — zero JS frameworks, plain HTML/CSS/JS
 
-- Linux machine with [Tailscale](https://tailscale.com/download) installed and running
+---
+
+## Requirements
+
+- Linux machine with [Tailscale](https://tailscale.com/download) installed and connected
 - Python 3.11+
+- `fping` and `nmap` (installed automatically by `start.sh`)
 - Git
 
-### 2. Install
+---
+
+## Quick Start
 
 ```bash
 git clone https://github.com/PizzaCow/TailScan /opt/tailscan
 cd /opt/tailscan
 chmod +x start.sh update.sh
 ./start.sh
-# First run creates .env — edit it, then run ./start.sh again
 ```
 
-### 4. Configure `.env`
+On first run, `start.sh` creates `.env` from `.env.example` and exits. Edit it:
 
-```env
-PASSWORD_HASH=<sha256 of your password>
-SECRET_KEY=<random 32-char string>
-TAILNET=your-tailnet-name
-```
-
-Generate values:
 ```bash
-# Password hash
-python3 -c "import hashlib; print(hashlib.sha256(b'yourpassword').hexdigest())"
-
-# Secret key
-python3 -c "import secrets; print(secrets.token_hex(32))"
+nano /opt/tailscan/.env
 ```
 
-### 5. Launch
+Then run again:
 
 ```bash
 ./start.sh
@@ -56,14 +62,41 @@ Access at `http://<tailscale-ip>:8080`
 
 ---
 
-## Run as a service (optional)
+## Configuration
+
+`.env` file (copy from `.env.example`):
+
+```env
+PASSWORD_HASH=<sha256 hex of your password>
+SECRET_KEY=<random 64-char hex string>
+```
+
+Generate values:
 
 ```bash
-cp tailscan.service /etc/systemd/system/
-# Edit WorkingDirectory in the service file if you installed somewhere other than /opt/tailscan
-systemctl daemon-reload
-systemctl enable tailscan
-systemctl start tailscan
+# Password hash
+python3 -c "import hashlib; print(hashlib.sha256(b'yourpassword').hexdigest())"
+
+# Secret key
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+---
+
+## Run as a systemd service
+
+```bash
+sudo cp tailscan.service /etc/systemd/system/
+# Edit WorkingDirectory if you installed somewhere other than /opt/tailscan
+sudo systemctl daemon-reload
+sudo systemctl enable --now tailscan
+```
+
+Check status:
+
+```bash
+sudo systemctl status tailscan
+journalctl -u tailscan -f
 ```
 
 ---
@@ -75,31 +108,32 @@ cd /opt/tailscan
 ./update.sh
 ```
 
----
-
-## Features
-
-- **Password login** — simple password auth, session cookie keeps you signed in for 7 days
-- **Exit node selector** — see all tailnet devices, click to connect
-- **LAN scan** — nmap ping sweep auto-detects subnet, shows IP, hostname, ping, MAC, vendor
-- **WAN + Geo** — WAN IP, city, region, country, lat/lon, ISP, timezone via ip-api.com
-- **Auto-refresh** — scans every 30s while connected
-- **Dark UI** — clean dark theme
+Pulls latest from GitHub and restarts the server (or restarts the systemd service if active).
 
 ---
 
-## Security
+## How exit node scanning works
 
-- UI is only served on port 8080 — keep it on Tailscale, don't expose to public internet
-- Auth via Tailscale SSO — only your tailnet members can log in
-- Switching exit nodes affects **all** server traffic — use on a dedicated machine
+TailScan detects the active exit node's advertised subnet from the Tailscale status JSON (`AllowedIPs`). The exit node must have **subnet routing enabled and approved** in the Tailscale admin console.
+
+If no advertised subnet is found, TailScan falls back to the server's local routing table.
+
+---
+
+## Security notes
+
+- Run on a **dedicated machine** — switching exit nodes affects all server traffic
+- Keep port 8080 on Tailscale only; do **not** expose to the public internet
+- `.env` contains your password hash and secret key — keep it out of git (already in `.gitignore`)
 
 ---
 
 ## Stack
 
-- Python + FastAPI
-- nmap for LAN scanning
-- ip-api.com for WAN geolocation (free, no key needed)
-- Tailscale OAuth for auth
-- Zero JS frameworks — plain HTML/CSS/JS frontend
+| Component | Purpose |
+|---|---|
+| Python + FastAPI | Backend + SSE streaming |
+| fping | Fast LAN host discovery |
+| nmap | On-demand port scanning (TCP connect, no probes) |
+| ip-api.com | WAN geolocation (free, no key required) |
+| Plain HTML/CSS/JS | Frontend — no frameworks |
