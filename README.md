@@ -2,6 +2,8 @@
 
 A fast LAN scanner that runs on your Tailscale network. Connect to an exit node and scan what's on its local network — from anywhere.
 
+> **Docker project.** The recommended way to run TailScan is via Docker Compose. Manual/bare-metal setup is possible but not the primary path.
+
 ## What it does
 
 - Connects to any Tailscale exit node
@@ -109,74 +111,89 @@ echo -n 'yourpassword' | sha256sum
 
 ### Requirements
 
+- Docker + Docker Compose
+- Tailscale installed and running on the host
+- The host must be able to use Tailscale exit nodes
+
+### 1. Clone the repo
+
+```bash
+git clone https://github.com/PizzaCow/TailScan /opt/tailscan
+cd /opt/tailscan
+```
+
+### 2. Generate the Guacamole DB init SQL (one time only)
+
+```bash
+docker run --rm guacamole/guacamole:latest \
+  /opt/guacamole/bin/initdb.sh --postgresql > guacamole/initdb.sql
+```
+
+### 3. Create `.env`
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Fill in:
+
+```env
+PASSWORD_HASH=<sha256 of your password>   # echo -n 'yourpassword' | sha256sum
+SECRET_KEY=<random string>
+POSTGRES_PASSWORD=<pick anything>
+GUAC_ADMIN_USER=guacadmin
+GUAC_ADMIN_PASS=guacadmin
+```
+
+### 4. Start
+
+```bash
+docker compose up -d --build
+```
+
+- TailScan: `http://<host-ip>:8080`
+- Guacamole: `http://<host-ip>:8085/guacamole`
+
+**Change the Guacamole admin password** after first login: Settings → Users.
+
+### Updating
+
+```bash
+git pull && docker compose up -d --build
+```
+
+### Managing with Dockge
+
+[Dockge](https://github.com/louislam/dockge) is a nice UI for managing Docker Compose stacks. To install:
+
+```bash
+mkdir -p /opt/dockge /opt/stacks
+curl -o /opt/dockge/compose.yaml https://raw.githubusercontent.com/louislam/dockge/master/compose.yaml
+docker compose -f /opt/dockge/compose.yaml up -d
+```
+
+Dockge will be at `http://<host-ip>:5001`. Point it at `/opt/stacks` and add TailScan as a stack there.
+
+### Manual / bare-metal (not recommended)
+
+If you can't use Docker:
+
 ```bash
 # Debian/Ubuntu
 apt install fping nmap
 pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8080
 
-# Rocky/RHEL (fping must be built from source)
+# Rocky/RHEL (fping must be built from source — not in repos)
 dnf install -y gcc make nmap
 curl -L https://fping.org/dist/fping-5.2.tar.gz | tar xz
 cd fping-5.2 && ./configure && make && make install
 pip install -r requirements.txt
-```
-
-### .env
-
-```env
-PASSWORD_HASH=<sha256 of your password>
-SECRET_KEY=<random string>
-CACHE_DIR=/tmp/tailscan-cache        # optional
-GUAC_URL=http://localhost:8085/guacamole
-GUAC_ADMIN_USER=guacadmin
-GUAC_ADMIN_PASS=<your guacadmin password>
-```
-
-### Guacamole
-
-TailScan expects Guacamole running on port 8085. A `docker-compose.yml` is provided in `guacamole/`:
-
-```bash
-# Generate the Postgres init SQL first
-docker run --rm guacamole/guacamole:latest \
-  /opt/guacamole/bin/initdb.sh --postgresql > guacamole/initdb.sql
-
-# Set your Postgres password
-echo 'POSTGRES_PASSWORD=changeme' > guacamole/.env
-
-# Start
-cd guacamole && docker compose up -d
-```
-
-Default Guacamole login: `guacadmin` / `guacadmin` — **change this immediately** via Settings → Users.
-
-### Run TailScan
-
-```bash
 uvicorn main:app --host 0.0.0.0 --port 8080
 ```
 
-### systemd service
-
-```ini
-[Unit]
-Description=TailScan
-After=network.target tailscaled.service
-
-[Service]
-WorkingDirectory=/opt/tailscan
-ExecStart=/usr/local/bin/uvicorn main:app --host 0.0.0.0 --port 8080
-Restart=always
-EnvironmentFile=/opt/tailscan/.env
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-cp tailscan.service /etc/systemd/system/
-systemctl enable --now tailscan
-```
+You'll need to set up Guacamole separately and point `GUAC_URL` at it.
 
 ## Notes
 
