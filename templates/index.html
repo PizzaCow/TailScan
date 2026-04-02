@@ -113,13 +113,32 @@
     font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px;
     color: var(--muted); border-bottom: 1px solid var(--border);
   }
-  td { padding: 10px 12px; border-bottom: 1px solid rgba(45,49,72,0.5); }
+  td { padding: 8px 12px; border-bottom: 1px solid rgba(45,49,72,0.5); vertical-align: middle; }
   tr:last-child td { border-bottom: none; }
-  tr:hover td { background: var(--surface2); }
+  tr.device-row:hover td { background: var(--surface2); }
   .status-up { color: var(--green); font-weight: 600; }
-  .ping { font-family: monospace; }
-  .ip-cell { font-family: monospace; color: var(--accent); }
-  .mac-cell { font-family: monospace; font-size: 11px; color: var(--muted); }
+  .ip-cell { font-family: monospace; color: var(--accent); white-space: nowrap; }
+
+  /* Port chips */
+  .port-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .port-chip {
+    font-size: 11px; font-family: monospace; font-weight: 600;
+    padding: 2px 7px; border-radius: 4px;
+    background: rgba(91,110,232,0.15); color: #a5b4fc;
+    border: 1px solid rgba(91,110,232,0.25);
+    cursor: default; white-space: nowrap;
+  }
+  .port-chip:hover { background: rgba(91,110,232,0.28); }
+  .port-chip title { display: none; }
+  .ports-scanning {
+    font-size: 11px; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .spinner-sm {
+    display: inline-block; width: 10px; height: 10px;
+    border: 1.5px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0;
+  }
 
   /* Empty / loading states */
   .empty-state {
@@ -315,7 +334,7 @@ function ensureScanUI() {
           <div class="card-title" id="device-card-title">LAN Devices</div>
           <div class="table-wrap"><table>
             <thead><tr>
-              <th>IP</th><th>Hostname</th><th>Ping</th><th>MAC</th><th>Vendor</th><th>Status</th><th>Ports</th>
+              <th>IP</th><th>Status</th><th>Open Ports</th>
             </tr></thead>
             <tbody id="device-tbody"></tbody>
           </table></div>
@@ -381,14 +400,10 @@ function runScan() {
       const tbody = document.getElementById('device-tbody');
 
       if (isNew) {
-        // Insert row in sorted IP order
         const row = document.createElement('tr');
         row.id = `row-${key}`;
+        row.className = 'device-row';
         row.innerHTML = deviceRowHTML(d);
-        const portRow = document.createElement('tr');
-        portRow.id = `ports-${key}`;
-        portRow.style.display = 'none';
-        portRow.innerHTML = '<td colspan="7" style="padding:0 12px 12px 12px;"></td>';
 
         // Insert sorted by IP
         const rows = tbody.querySelectorAll('tr[id^="row-"]');
@@ -396,17 +411,13 @@ function runScan() {
         for (const r of rows) {
           const rip = r.id.replace('row-','').replace(/-/g,'.');
           if (ipNum(d.ip) < ipNum(rip)) {
-            tbody.insertBefore(portRow, r);
-            tbody.insertBefore(row, portRow);
+            tbody.insertBefore(row, r);
             inserted = true; break;
           }
         }
-        if (!inserted) { tbody.appendChild(row); tbody.appendChild(portRow); }
-      } else {
-        // Update hostname/ping if changed (don't touch ports row)
-        const row = document.getElementById(`row-${key}`);
-        if (row) row.innerHTML = deviceRowHTML(d);
+        if (!inserted) tbody.appendChild(row);
       }
+      // (don't touch existing rows on refresh — port data stays)
 
       const title = document.getElementById('device-card-title');
       if (title) title.textContent =
@@ -428,7 +439,6 @@ function runScan() {
         if (!seenIPs.has(ip)) {
           const key = ip.replace(/\./g, '-');
           document.getElementById(`row-${key}`)?.remove();
-          document.getElementById(`ports-${key}`)?.remove();
           delete knownDevices[ip];
         }
       }
@@ -444,12 +454,11 @@ function runScan() {
 
       resetCountdown();
 
-      // Auto port scan: queue IPs that don't have port data yet
+      // Auto port scan: queue IPs showing "queued" spinner (not yet scanned)
       const newIPs = [...seenIPs].filter(ip => {
         const key = ip.replace(/\./g, '-');
-        const portRow = document.getElementById(`ports-${key}`);
-        // Only queue if not already scanned (port row still hidden = not yet done)
-        return portRow && portRow.style.display === 'none';
+        const cell = document.getElementById(`ports-inline-${key}`);
+        return cell && cell.querySelector('.ports-scanning');
       });
       if (newIPs.length) {
         portScanQueue.push(...newIPs);
@@ -467,16 +476,12 @@ function runScan() {
 }
 
 function deviceRowHTML(d) {
+  const key = d.ip.replace(/\./g, '-');
   return `
     <td class="ip-cell">${escHtml(d.ip)}</td>
-    <td>${escHtml(d.hostname)}</td>
-    <td class="ping">${d.ping_ms != null ? d.ping_ms + ' ms' : '—'}</td>
-    <td class="mac-cell">${escHtml(d.mac)}</td>
-    <td style="color:var(--muted);font-size:12px;">${escHtml(d.vendor)}</td>
     <td class="status-up">●&nbsp;up</td>
-    <td id="port-btn-${d.ip.replace(/\./g,'-')}">
-      <button class="btn btn-ghost" style="padding:3px 10px;font-size:11px;"
-        onclick="portScanManual('${d.ip}')">Scan Ports</button>
+    <td id="ports-inline-${key}">
+      <div class="ports-scanning"><div class="spinner-sm"></div><span>queued</span></div>
     </td>`;
 }
 
@@ -489,7 +494,6 @@ function ipNum(ip) {
 // ── Port scan ────────────────────────────────────────────────────────────────
 
 function portScanManual(ip) {
-  // Remove from auto queue if pending, then scan immediately
   portScanQueue = portScanQueue.filter(q => q !== ip);
   portScan(ip);
 }
@@ -499,7 +503,6 @@ async function drainPortScanQueue() {
   portScanRunning = true;
   while (portScanQueue.length > 0) {
     const ip = portScanQueue.shift();
-    // Skip if row was removed (device disappeared)
     if (!document.getElementById(`row-${ip.replace(/\./g,'-')}`)) continue;
     await portScan(ip);
   }
@@ -508,48 +511,31 @@ async function drainPortScanQueue() {
 
 async function portScan(ip) {
   const key = ip.replace(/\./g, '-');
-  const row = document.getElementById(`ports-${key}`);
-  const btnCell = document.getElementById(`port-btn-${key}`);
-  if (!row) return;
+  const cell = document.getElementById(`ports-inline-${key}`);
+  if (!cell) return;
 
-  row.style.display = '';
-  row.querySelector('td').innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;padding:4px 0">
-      <div class="spinner"></div> Scanning ${escHtml(ip)}...
-    </div>`;
-  if (btnCell) btnCell.innerHTML = `<span style="font-size:11px;color:var(--muted);">scanning...</span>`;
+  cell.innerHTML = `<div class="ports-scanning"><div class="spinner-sm"></div><span style="font-size:11px;">scanning...</span></div>`;
 
   try {
     const r = await fetch(`/api/port-scan?ip=${encodeURIComponent(ip)}`);
     const d = await r.json();
     if (d.error) {
-      row.querySelector('td').innerHTML =
-        `<div style="color:var(--red);font-size:13px;padding:4px 0;">⚠ ${escHtml(d.error)}</div>`;
+      cell.innerHTML = `<span style="color:var(--red);font-size:11px;">⚠ ${escHtml(d.error)}</span>`;
     } else {
       const ports = d.open_ports || [];
-      const os = d.os_guess || '';
-      const portHtml = ports.length
-        ? ports.map(p => `
-            <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);">
-              <span style="font-family:monospace;font-weight:600;color:var(--accent);min-width:54px;">${p.port}/${p.proto}</span>
-              <span style="font-size:12px;color:var(--text);">${escHtml(p.service)}</span>
-            </div>`).join('')
-        : '<div style="color:var(--muted);font-size:13px;">No common ports open</div>';
-      row.querySelector('td').innerHTML = `
-        <div style="background:var(--surface2);border-radius:8px;padding:12px;margin:4px 0;">
-          ${os ? `<div style="font-size:11px;color:var(--muted);margin-bottom:8px;">OS: <span style="color:var(--text);">${escHtml(os)}</span></div>` : ''}
-          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.7px;color:var(--muted);margin-bottom:6px;">Open Ports</div>
-          ${portHtml}
-        </div>`;
+      if (ports.length === 0) {
+        cell.innerHTML = `<span style="color:var(--muted);font-size:11px;">none</span>`;
+      } else {
+        // Chips with tooltip showing service name
+        const chips = ports.map(p =>
+          `<span class="port-chip" title="${escHtml(p.service)}">${p.port}</span>`
+        ).join('');
+        cell.innerHTML = `<div class="port-chips">${chips}</div>`;
+      }
     }
   } catch(e) {
-    row.querySelector('td').innerHTML =
-      `<div style="color:var(--red);font-size:13px;padding:4px 0;">Scan failed</div>`;
+    cell.innerHTML = `<span style="color:var(--red);font-size:11px;">failed</span>`;
   }
-
-  if (btnCell) btnCell.innerHTML =
-    `<button class="btn btn-ghost" style="padding:3px 10px;font-size:11px;"
-      onclick="portScanManual('${ip}')">Rescan</button>`;
 }
 
 // ── Auto-refresh ─────────────────────────────────────────────────────────────
